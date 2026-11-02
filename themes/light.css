@@ -1,0 +1,289 @@
+/* git2html theme: light (single palette).
+ *
+ * Implements the shared theme contract -- the same class vocabulary the
+ * luasmith WebVeld site templates emit. Conforms to the full WebVeld
+ * specification. See auto.css for the annotated reference and for the variant
+ * that follows the reader's system colour-scheme preference.
+ */
+
+html {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+	line-height: 1.6;
+	color: #24292e;
+	background-color: #ffffff;
+	/* Reserves the scrollbar's width on every page, short or tall, so
+	   navigating between pages of different heights (e.g. Files to Log)
+	   doesn't shift the whole layout sideways when the scrollbar
+	   appears or disappears. */
+	overflow-y: scroll;
+}
+
+body {
+	margin: 0;
+	padding: 0;
+	background-color: #ffffff;
+	color: #24292e;
+}
+
+.site-container {
+	box-sizing: border-box;
+	max-width: 62rem;
+	width: 100%;
+	margin: 0 auto;
+	padding: 2rem 1.5rem 4rem 1.5rem;
+	min-height: 100vh;
+}
+
+.skip {
+	display: inline-block;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	font-size: 0.8rem;
+	color: #6a737d;
+	text-decoration: none;
+}
+
+.skip:focus {
+	width: auto;
+	height: auto;
+	overflow: visible;
+	clip-path: none;
+	margin-bottom: 1rem;
+	padding: 0.35rem 0.75rem;
+	font-weight: 600;
+	color: #24292e;
+	background-color: #f1f3f5;
+	border-radius: 4px;
+	outline: 2px solid #0366d6;
+	outline-offset: 2px;
+}
+
+.masthead {
+	border-bottom: 1px solid #e1e4e8;
+	padding-bottom: 0.85rem;
+	margin-bottom: 2rem;
+}
+
+.brand {
+	margin: 0;
+	font-size: 1.35rem;
+	font-weight: 700;
+	letter-spacing: -0.01em;
+	color: #24292e;
+	border-bottom: 0;
+	padding-bottom: 0;
+}
+
+.brand a {
+	color: #24292e;
+	text-decoration: none;
+}
+
+.brand a:hover {
+	color: #0366d6;
+}
+
+.nav {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.4rem 0.85rem;
+	margin: 0.25rem 0 0 0;
+	font-size: 0.95rem;
+}
+
+.nav a {
+	color: #0366d6;
+	text-decoration: none;
+	font-weight: 600;
+	padding: 0.2rem 0.35rem;
+}
+
+.nav a:hover {
+	text-decoration: underline;
+}
+
+a {
+	color: #0366d6;
+	text-decoration: underline;
+}
+
+a:hover {
+	color: #0550ae;
+}
+
+a:focus,
+.nav a:focus,
+.brand a:focus,
+pre:focus {
+	outline: 2px solid #0366d6;
+	outline-offset: 2px;
+}
+
+h1, h2, h3 {
+	line-height: 1.25;
+	font-weight: 600;
+	color: #24292e;
+}
+
+h1 { font-size: 1.85rem; margin: 0 0 1.1rem 0; font-weight: 700; }
+h2 { font-size: 1.35rem; margin: 2rem 0 0.6rem 0; }
+h3 { font-size: 1.15rem; margin: 1.5rem 0 0.4rem 0; }
+
+p { margin: 0 0 1.1rem 0; }
+
+.listing {
+	width: 100%;
+	border-collapse: collapse;
+	margin-bottom: 1.5rem;
+}
+
+.listing th,
+.listing td {
+	padding: 0.5rem 0.6rem;
+	border-bottom: 1px solid #e1e4e8;
+	text-align: left;
+	vertical-align: top;
+	overflow-wrap: break-word;
+}
+
+.listing th { font-weight: 600; }
+
+.listing tr:hover { background-color: #f6f8fa; }
+
+.clone-url { font-weight: 600; }
+
+.release-url { font-weight: 600; }
+
+
+.col-name { width: 25%; }
+.col-desc { width: 55%; }
+.col-changed { width: 20%; white-space: nowrap; }
+.col-hash { width: 12%; }
+.col-date { width: 20%; }
+.col-subject { width: 50%; }
+.col-author { width: 18%; }
+
+.readme {
+	border: 1px solid #e1e4e8;
+	border-radius: 6px;
+	padding: 1.5rem 1.75rem;
+	margin-top: 1.5rem;
+}
+
+.readme > :first-child { margin-top: 0; }
+
+
+/* Frontmatter table: outlined with a contrasting background so it reads as
+   metadata rather than body text. Keys and values are left-aligned. */
+.readme table.frontmatter {
+	border-collapse: collapse;
+	margin-bottom: 1.5rem;
+	border: 1px solid #d0d7de;
+	background-color: #f6f8fa;
+}
+
+.readme table.frontmatter th,
+.readme table.frontmatter td {
+	padding: 0.4rem 0.75rem;
+	border: 1px solid #d0d7de;
+	text-align: left;
+	vertical-align: top;
+	overflow-wrap: break-word;
+}
+
+.readme table.frontmatter th {
+	font-weight: 600;
+	background-color: #eaeef2;
+}
+
+/* Class hooks used instead of inline styles/attributes the WebVeld-patched
+   lunamark writer avoids: pipe-table column alignment, fancy_lists' roman/
+   alpha ordered-list numbering, and task_list checkbox markers. */
+.align-left { text-align: left; }
+.align-right { text-align: right; }
+.align-center { text-align: center; }
+
+.list-upper-roman { list-style-type: upper-roman; }
+.list-lower-roman { list-style-type: lower-roman; }
+.list-upper-alpha { list-style-type: upper-alpha; }
+.list-lower-alpha { list-style-type: lower-alpha; }
+
+.tasklist-item { list-style-type: none; }
+
+img { max-width: 100%; height: auto; }
+
+code, kbd, samp, pre {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+code {
+	font-size: 0.875em;
+	background-color: #f1f3f5;
+	color: #1f2328;
+	padding: 0.15em 0.35em;
+	border-radius: 3px;
+}
+
+pre {
+	background-color: #f6f8fa;
+	border: 1px solid #e1e4e8;
+	border-radius: 6px;
+	padding: 1rem 1.25rem;
+	font-size: 0.85rem;
+	line-height: 1.55;
+	color: #24292e;
+	overflow-x: auto;
+	white-space: pre;
+	box-sizing: border-box;
+}
+
+pre code {
+	background-color: transparent;
+	padding: 0;
+	font-size: inherit;
+	color: inherit;
+	border-radius: 0;
+}
+
+/* hl-identifier and hl-whitespace inherit from pre by design. */
+.hl-comment { color: #6a737d; font-style: italic; }
+.hl-string { color: #032f62; }
+.hl-number { color: #005cc5; }
+.hl-keyword { color: #d73a49; font-weight: 600; }
+.hl-operator { color: #24292e; }
+.hl-type { color: #22863a; }
+.hl-variable { color: #e36209; }
+.hl-self { color: #6f42c1; font-style: italic; }
+
+.hl-function { color: #6f42c1; }
+.hl-preprocessor { color: #e36209; }
+.hl-constant { color: #005cc5; }
+.hl-tag { color: #22863a; }
+.hl-property { color: #005cc5; }
+.hl-label { color: #6f42c1; }
+.hl-error { color: #b31d28; }
+
+.colophon {
+	margin-top: 3.5rem;
+	padding-top: 1rem;
+	border-top: 1px solid #e1e4e8;
+	color: #6a737d;
+	font-size: 0.9rem;
+}
+
+@media (max-width: 640px) {
+	.site-container { padding: 1.25rem 1rem 3rem 1rem; }
+	.brand { font-size: 1.2rem; }
+	h1 { font-size: 1.55rem; }
+	h2 { font-size: 1.25rem; }
+	.listing th,
+	.listing td { padding: 0.4rem 0.35rem; }
+	.col-desc,
+	.listing th:nth-child(2),
+	.listing td:nth-child(2) { display: none; }
+	pre { font-size: 0.8rem; padding: 0.75rem 0.9rem; }
+}

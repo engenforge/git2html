@@ -1,0 +1,502 @@
+/* git2html theme: auto (light and dark, following the reader's system setting).
+ *
+ * This is the reference implementation of the shared theme contract -- the same
+ * class vocabulary the luasmith WebVeld site templates emit, so a single style
+ * sheet can drive both generators. Conforms to the full WebVeld specification.
+ *
+ * Visual design and palette inspired by PaperMod by Aditya Telange
+ * (https://github.com/adityatelange/hugo-PaperMod).
+ *
+ * WebVeld notes:
+ *   - No custom properties: section 6.7 forbids them, so colours are literal.
+ *     Generate variants by substitution at build time, not with var().
+ *   - No table-layout or text-overflow: section 6.2 permits neither. Column
+ *     proportions come from colgroup widths and long cells wrap.
+ *   - Dark palette via @media (prefers-color-scheme: dark), per Appendix A.7.
+ */
+
+html {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+	line-height: 1.6;
+	color: #212529;
+	background-color: #ffffff;
+	/* Reserves the scrollbar's width on every page, short or tall, so
+	   navigating between pages of different heights (e.g. Files to Log)
+	   doesn't shift the whole layout sideways when the scrollbar
+	   appears or disappears. */
+	overflow-y: scroll;
+}
+
+body {
+	margin: 0;
+	padding: 0;
+	background-color: #ffffff;
+	color: #212529;
+}
+
+.site-container {
+	box-sizing: border-box;
+	max-width: 62rem;
+	width: 100%;
+	margin: 0 auto;
+	padding: 2rem 1.5rem 4rem 1.5rem;
+	min-height: 100vh;
+}
+
+/* Skip link (Appendix A.5: inline-block is load-bearing) -------------------- */
+
+.skip {
+	display: inline-block;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	font-size: 0.8rem;
+	color: #6b7280;
+	text-decoration: none;
+}
+
+.skip:focus {
+	width: auto;
+	height: auto;
+	overflow: visible;
+	clip-path: none;
+	margin-bottom: 1rem;
+	padding: 0.35rem 0.75rem;
+	font-weight: 600;
+	color: #111827;
+	background-color: #f1f3f5;
+	border-radius: 4px;
+	outline: 2px solid #0969da;
+	outline-offset: 2px;
+}
+
+/* Masthead and navigation -------------------------------------------------- */
+
+.masthead {
+	border-bottom: 1px solid #e5e7eb;
+	padding-bottom: 0.85rem;
+	margin-bottom: 2rem;
+}
+
+.brand {
+	margin: 0;
+	font-size: 1.35rem;
+	font-weight: 700;
+	letter-spacing: -0.01em;
+	color: #111827;
+	border-bottom: 0;
+	padding-bottom: 0;
+}
+
+.brand a {
+	color: #111827;
+	text-decoration: none;
+}
+
+.brand a:hover {
+	color: #0969da;
+}
+
+.nav {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.4rem 0.85rem;
+	margin: 0.25rem 0 0 0;
+	font-size: 0.95rem;
+}
+
+.nav a {
+	color: #4b5563;
+	text-decoration: none;
+	padding: 0.2rem 0.35rem;
+}
+
+.nav a:hover {
+	color: #0969da;
+	text-decoration: underline;
+}
+
+.nav a.here {
+	color: #111827;
+	font-weight: 600;
+	text-decoration: underline;
+}
+
+a {
+	color: #0969da;
+	text-decoration: underline;
+}
+
+a:hover {
+	color: #0550ae;
+}
+
+a:focus,
+.nav a:focus,
+.brand a:focus {
+	outline: 2px solid #0969da;
+	outline-offset: 2px;
+}
+
+/* Typography --------------------------------------------------------------- */
+
+h1, h2, h3 {
+	line-height: 1.25;
+	font-weight: 600;
+	color: #111827;
+}
+
+h1 {
+	font-size: 1.85rem;
+	margin: 0 0 1.1rem 0;
+	font-weight: 700;
+}
+
+h2 {
+	font-size: 1.35rem;
+	margin: 2rem 0 0.6rem 0;
+}
+
+h3 {
+	font-size: 1.15rem;
+	margin: 1.5rem 0 0.4rem 0;
+}
+
+p {
+	margin: 0 0 1.1rem 0;
+}
+
+/* Listings (file trees, repository indexes, commit logs) ------------------- */
+
+.listing {
+	width: 100%;
+	border-collapse: collapse;
+	margin-bottom: 1.5rem;
+}
+
+.listing th,
+.listing td {
+	padding: 0.5rem 0.6rem;
+	border-bottom: 1px solid #e5e7eb;
+	text-align: left;
+	vertical-align: top;
+	overflow-wrap: break-word;
+}
+
+.listing th {
+	font-weight: 600;
+	color: #111827;
+}
+
+.listing tr:hover {
+	background-color: #f6f8fa;
+}
+
+.clone-url {
+	font-weight: 600;
+}
+
+.release-url {
+	font-weight: 600;
+}
+
+
+/* Column proportions. Without table-layout these are hints, so a long name
+ * wraps rather than being clipped -- which is the behaviour we want anyway. */
+.col-name { width: 25%; }
+.col-desc { width: 55%; }
+.col-changed { width: 20%; white-space: nowrap; }
+.col-hash { width: 12%; }
+.col-date { width: 20%; }
+.col-subject { width: 50%; }
+.col-author { width: 18%; }
+
+/* Rendered markdown -------------------------------------------------------- */
+
+.readme {
+	border: 1px solid #e5e7eb;
+	border-radius: 6px;
+	padding: 1.5rem 1.75rem;
+	margin-top: 1.5rem;
+}
+
+.readme > :first-child {
+	margin-top: 0;
+}
+
+
+/* Frontmatter table: outlined with a contrasting background so it reads as
+   metadata rather than body text. Keys and values are left-aligned. */
+.readme table.frontmatter {
+	border-collapse: collapse;
+	margin-bottom: 1.5rem;
+	border: 1px solid #d0d7de;
+	background-color: #f6f8fa;
+}
+
+.readme table.frontmatter th,
+.readme table.frontmatter td {
+	padding: 0.4rem 0.75rem;
+	border: 1px solid #d0d7de;
+	text-align: left;
+	vertical-align: top;
+	overflow-wrap: break-word;
+}
+
+.readme table.frontmatter th {
+	font-weight: 600;
+	background-color: #eaeef2;
+}
+
+/* Class hooks used instead of inline styles/attributes the WebVeld-patched
+   lunamark writer avoids: pipe-table column alignment, fancy_lists' roman/
+   alpha ordered-list numbering, and task_list checkbox markers. */
+.align-left { text-align: left; }
+.align-right { text-align: right; }
+.align-center { text-align: center; }
+
+.list-upper-roman { list-style-type: upper-roman; }
+.list-lower-roman { list-style-type: lower-roman; }
+.list-upper-alpha { list-style-type: upper-alpha; }
+.list-lower-alpha { list-style-type: lower-alpha; }
+
+.tasklist-item { list-style-type: none; }
+
+img {
+	max-width: 100%;
+	height: auto;
+}
+
+/* Code --------------------------------------------------------------------- */
+
+code, kbd, samp, pre {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+code {
+	font-size: 0.875em;
+	background-color: #f1f3f5;
+	color: #1f2328;
+	padding: 0.15em 0.35em;
+	border-radius: 3px;
+}
+
+pre {
+	background-color: #f6f8fa;
+	border: 1px solid #e5e7eb;
+	border-radius: 6px;
+	padding: 1rem 1.25rem;
+	font-size: 0.85rem;
+	line-height: 1.55;
+	color: #24292e;
+	overflow-x: auto;
+	white-space: pre;
+	box-sizing: border-box;
+}
+
+pre:focus {
+	outline: 2px solid #0969da;
+	outline-offset: 2px;
+}
+
+pre code {
+	background-color: transparent;
+	padding: 0;
+	font-size: inherit;
+	color: inherit;
+	border-radius: 0;
+}
+
+/* Syntax highlighting.
+ * The first group is what the bundled highlighter actually emits; the second
+ * covers tokens other lexers produce so a shared style sheet stays complete.
+ * hl-identifier and hl-whitespace are deliberately unstyled: they are ordinary
+ * code text and inherit from pre. */
+.hl-comment { color: #6a737d; font-style: italic; }
+.hl-string { color: #0a7b45; }
+.hl-number { color: #005cc5; }
+.hl-keyword { color: #d73a49; font-weight: 600; }
+.hl-operator { color: #24292e; }
+.hl-type { color: #22863a; }
+.hl-variable { color: #e36209; }
+.hl-self { color: #6f42c1; font-style: italic; }
+
+.hl-function { color: #6f42c1; }
+.hl-preprocessor { color: #e36209; }
+.hl-constant { color: #005cc5; }
+.hl-tag { color: #22863a; }
+.hl-property { color: #005cc5; }
+.hl-label { color: #6f42c1; }
+.hl-error { color: #b31d28; }
+
+/* Colophon ----------------------------------------------------------------- */
+
+.colophon {
+	margin-top: 3.5rem;
+	padding-top: 1rem;
+	border-top: 1px solid #e5e7eb;
+	color: #6b7280;
+	font-size: 0.9rem;
+}
+
+/* Dark palette (Appendix A.7) ---------------------------------------------- */
+
+@media (prefers-color-scheme: dark) {
+	html,
+	body {
+		background-color: #1d1e20;
+		color: #dadadb;
+	}
+
+	h1, h2, h3,
+	.brand,
+	.brand a,
+	.listing th {
+		color: #f4f4f5;
+	}
+
+	a {
+		color: #60a5fa;
+	}
+
+	a:hover {
+		color: #93c5fd;
+	}
+
+	a:focus,
+	.nav a:focus,
+	.brand a:focus,
+	pre:focus {
+		outline: 2px solid #60a5fa;
+		outline-offset: 2px;
+	}
+
+	.brand a:hover,
+	.nav a:hover {
+		color: #60a5fa;
+	}
+
+	.masthead {
+		border-bottom: 1px solid #2e2e33;
+	}
+
+	.nav a {
+		color: #9ca3af;
+	}
+
+	.nav a.here {
+		color: #f4f4f5;
+	}
+
+	.listing th,
+	.listing td {
+		border-bottom: 1px solid #2e2e33;
+	}
+
+	.listing tr:hover {
+		background-color: #232427;
+	}
+
+	.readme {
+		border: 1px solid #2e2e33;
+	}
+
+	.readme table.frontmatter {
+		border-color: #3b3c40;
+		background-color: #28292d;
+	}
+
+	.readme table.frontmatter th,
+	.readme table.frontmatter td {
+		border-color: #3b3c40;
+	}
+
+	.readme table.frontmatter th {
+		background-color: #2e2e33;
+	}
+
+	code {
+		background-color: #2e2e33;
+		color: #e4e4e7;
+	}
+
+	pre {
+		background-color: #28292d;
+		border: 1px solid #3b3c40;
+		color: #e4e4e7;
+	}
+
+	.colophon {
+		border-top: 1px solid #2e2e33;
+		color: #9ca3af;
+	}
+
+	.skip {
+		color: #9ca3af;
+	}
+
+	.skip:focus {
+		color: #ffffff;
+		background-color: #28292d;
+		outline: 2px solid #60a5fa;
+		outline-offset: 2px;
+	}
+
+	.hl-comment { color: #8b949e; }
+	.hl-string { color: #7ee787; }
+	.hl-number { color: #79c0ff; }
+	.hl-keyword { color: #ff7b72; }
+	.hl-operator { color: #c9d1d9; }
+	.hl-type { color: #7ee787; }
+	.hl-variable { color: #ffa657; }
+	.hl-self { color: #d2a8ff; }
+
+	.hl-function { color: #d2a8ff; }
+	.hl-preprocessor { color: #ffa657; }
+	.hl-constant { color: #79c0ff; }
+	.hl-tag { color: #7ee787; }
+	.hl-property { color: #79c0ff; }
+	.hl-label { color: #d2a8ff; }
+	.hl-error { color: #f85149; }
+}
+
+/* Small viewports ---------------------------------------------------------- */
+
+@media (max-width: 640px) {
+	.site-container {
+		padding: 1.25rem 1rem 3rem 1rem;
+	}
+
+	.brand {
+		font-size: 1.2rem;
+	}
+
+	h1 {
+		font-size: 1.55rem;
+	}
+
+	h2 {
+		font-size: 1.25rem;
+	}
+
+	.listing th,
+	.listing td {
+		padding: 0.4rem 0.35rem;
+	}
+
+	/* The description column is the one that can be dropped without losing
+	 * navigation, and empty-cells has no effect on a collapsed border box. */
+	.col-desc,
+	.listing th:nth-child(2),
+	.listing td:nth-child(2) {
+		display: none;
+	}
+
+	pre {
+		font-size: 0.8rem;
+		padding: 0.75rem 0.9rem;
+	}
+}
