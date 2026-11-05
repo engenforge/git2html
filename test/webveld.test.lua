@@ -116,6 +116,21 @@ local function build_fixture()
     src:write('local function greet(name)\n  return "hello " .. name\nend\nreturn greet\n')
     src:close()
 
+    local png = "\137PNG\r\n\26\n\0\0\0\13IHDR\0\0\0\1\0\0\0\1\8\2\0\0\0\144wS"
+        .. "\222\0\0\0\12IDATx\156c\248\207\192\0\0\3\1\1\0\24\221\141\176\0\0\0"
+        .. "\0IEND\174B`\130"
+    local img = io.open(temp_repo .. "/logo.png", "wb")
+    img:write(png)
+    img:close()
+
+    local txt = io.open(temp_repo .. "/sample.txt", "w")
+    txt:write("WebVeld compatible plain text\n")
+    txt:close()
+
+    local bin = io.open(temp_repo .. "/blob.bin", "wb")
+    bin:write("\0\1\2\3\4\5")
+    bin:close()
+
     os.execute("git -C " .. temp_repo .. " add -A >/dev/null 2>&1")
     os.execute("git -C " .. temp_repo
         .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -m 'fixture' >/dev/null 2>&1")

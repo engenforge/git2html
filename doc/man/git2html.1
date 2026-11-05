@@ -5,7 +5,7 @@
 .nh
 .ad l
 .\" Begin generated content:
-.TH "git2html" "1" "2026\-11\-02"
+.TH "git2html" "1" "2026\-11\-05"
 .PP
 .SH NAME
 .PP
@@ -169,9 +169,10 @@ convention.\& Only if neither is available does the current time get used.\&
 .SH BINARY FILES
 .PP
 A file containing a NUL byte in its first block is treated as binary.\& It is
-copied into the output verbatim and given a landing page describing it and
-linking to it, so an image referenced from a README resolves and any asset can
-be downloaded.\& Text files are rendered with syntax highlighting as before.\&
+copied into the output verbatim.\& If the file is in a WebVeld\-compatible format
+(such as PNG or JPEG), its landing page displays the item directly; otherwise,
+it is given a landing page describing it and linking to download it.\& Text files
+are rendered with syntax highlighting as before.\&
 .PP
 .SH CONFORMANCE
 .PP

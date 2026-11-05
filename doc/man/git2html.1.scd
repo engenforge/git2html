@@ -128,9 +128,10 @@ convention. Only if neither is available does the current time get used.
 # BINARY FILES
 
 A file containing a NUL byte in its first block is treated as binary. It is
-copied into the output verbatim and given a landing page describing it and
-linking to it, so an image referenced from a README resolves and any asset can
-be downloaded. Text files are rendered with syntax highlighting as before.
+copied into the output verbatim. If the file is in a WebVeld-compatible format
+(such as PNG or JPEG), its landing page displays the item directly; otherwise,
+it is given a landing page describing it and linking to download it. Text files
+are rendered with syntax highlighting as before.
 
 # CONFORMANCE
 

@@ -317,6 +317,13 @@ local function rewrite_md_links(html)
     end))
 end
 
+local function is_markdown_file(path)
+    local ext = path:match("%.([^%.]+)$")
+    if not ext then return false end
+    local ext_lower = ext:lower()
+    return ext_lower == "md" or ext_lower == "markdown" or ext_lower == "mdown" or ext_lower == "mkdn" or ext_lower == "mkd"
+end
+
 -- A file with a NUL byte in its first block is not text. Rendering one into a
 -- <pre> produced a page of mojibake and, worse, meant the real file was never
 -- published: an image referenced from a README had nothing to point at and no
@@ -580,15 +587,20 @@ end
 -- from the theme. Without table-layout the widths are hints rather than hard
 -- constraints, so long names wrap instead of being clipped to an ellipsis --
 -- which keeps the content readable rather than truncating it.
-local function files_table(rows)
-    return '<div class="listing-pane" tabindex="0">' .. CI
-        .. '<table class="listing">' .. CI
+local function files_table(rows, scrollable)
+    local table_html = '<table class="listing">' .. CI
         .. '<colgroup><col class="col-name"><col class="col-desc"><col class="col-changed"></colgroup>' .. CI
         .. '<thead><tr><th>Name</th><th>Description</th><th>Last Changed</th></tr></thead>' .. CI
         .. '<tbody>' .. rows .. CI
         .. '</tbody>' .. CI
-        .. '</table>' .. CI
-        .. '</div>'
+        .. '</table>'
+    if scrollable then
+        return '<div class="listing-pane" tabindex="0">' .. CI
+            .. table_html .. CI
+            .. '</div>'
+    else
+        return table_html
+    end
 end
 
 local function log_table(rows)
@@ -690,7 +702,7 @@ local function generate_parent_indexes(output_root, header_parts, theme)
             -- that. A nested group's path is real extra information the nav
             -- doesn't carry, so it gets one.
             local index_content = i == 0 and "" or ("<h2>" .. breadcrumb_trail(parts) .. "</h2>" .. CI)
-            index_content = index_content .. files_table(rows)
+            index_content = index_content .. files_table(rows, false)
             local page_title = (i == 0 and "Repositories" or table.concat(parts, " / "))
             write_file(target_output .. "/index.html", template(page_title, index_content, rel_to_root))
         end
@@ -804,15 +816,34 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
                 if is_newer(html_target, source) then
                     log("    Skipping: " .. f.path .. ".html")
                 else
-                    local size = 0
-                    local probe = io.open(source, "rb")
-                    if probe then size = probe:seek("end") probe:close() end
-
+                    local ext = name:match("%.([^%.]+)$")
+                    local ext_lower = ext and ext:lower()
                     local file_breadcrumbs = breadcrumbs .. " / " .. name
-                    local body = string.format(
-                        '<h2>%s</h2>' .. CI .. '<p class="meta">Binary file, %s.</p>' .. CI
-                        .. '<p><a href="%s">Download %s</a></p>',
-                        file_breadcrumbs, human_size(size), name, name)
+                    local body
+
+                    if ext_lower == "png" or ext_lower == "jpg" or ext_lower == "jpeg" then
+                        body = string.format(
+                            '<h2>%s</h2>' .. CI .. '<p><img src="%s" alt="%s"></p>',
+                            file_breadcrumbs, attr_escape(name), attr_escape(name))
+                    elseif is_markdown_file(name) then
+                        local content = read_file(source) or ""
+                        local html_content = "<div class=\"readme\">" .. rewrite_md_links(md(content)) .. "</div>"
+                        body = "<h2>" .. file_breadcrumbs .. "</h2>" .. CI .. html_content
+                    elseif ext_lower == "txt" or ext_lower == "text" then
+                        local content = read_file(source) or ""
+                        local html_content = '<pre tabindex="0"><code>' .. hl_to_html(content, "text") .. "</code></pre>"
+                        body = "<h2>" .. file_breadcrumbs .. "</h2>" .. CI .. html_content
+                    else
+                        local size = 0
+                        local probe = io.open(source, "rb")
+                        if probe then size = probe:seek("end") probe:close() end
+
+                        body = string.format(
+                            '<h2>%s</h2>' .. CI .. '<p class="meta">Binary file, %s.</p>' .. CI
+                            .. '<p><a href="%s">Download %s</a></p>',
+                            file_breadcrumbs, human_size(size), name, name)
+                    end
+
                     write_file(html_target,
                         repo_template(header_parts, display_name .. " - " .. f.path,
                             body, rel_to_root))
@@ -827,13 +858,13 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
                     local content = read_file(source)
                     if content then
                         log("    Rendering: " .. f.path)
-                        local extension = name:match("%.([^%.]+)$")
-                        local is_markdown = (extension == "md" or extension == "markdown")
+                        local is_markdown = is_markdown_file(name)
                         local html_content
                         if is_markdown then
                             html_content = "<div class=\"readme\">" .. rewrite_md_links(md(content)) .. "</div>"
                         else
-                            local lang = extension
+                            local extension = name:match("%.([^%.]+)$")
+                            local lang = extension and extension:lower()
                             if not lang then
                                 if name:lower() == "makefile" then lang = "makefile"
                                 elseif name:lower() == "dockerfile" then lang = "dockerfile"
@@ -861,13 +892,17 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
     -- redesign fixed. A subdirectory's breadcrumbs carries real extra path
     -- information the nav doesn't, so it stays.
     local index_content = subdir == "" and "" or ("<h2>" .. breadcrumbs .. "</h2>" .. CI)
-    if subdir == "" then
+    local is_main_landing = (subdir == "")
+    if is_main_landing then
         index_content = index_content .. clone_line(header_parts)
         index_content = index_content .. release_line(header_parts)
     end
-    index_content = index_content .. files_table(rows)
-    if subdir == "" then
+    index_content = index_content .. files_table(rows, is_main_landing)
+    if is_main_landing then
         local readme = read_file(repo_path .. "/README.md")
+            or read_file(repo_path .. "/README.markdown")
+            or read_file(repo_path .. "/readme.md")
+            or read_file(repo_path .. "/README.MD")
         if readme then
             index_content = index_content .. CI .. "<div class=\"readme\">" .. rewrite_md_links(md(readme)) .. "</div>"
         end
@@ -1006,7 +1041,7 @@ local function walk_and_process(current_path, output_root, strip_path, theme)
             -- Same nav-only-at-root rule as generate_parent_indexes: skip
             -- the breadcrumb where it would just repeat "Repositories".
             local index_content = #header_parts == 0 and "" or ("<h2>" .. breadcrumb_trail(header_parts) .. "</h2>" .. CI)
-            index_content = index_content .. files_table(rows)
+            index_content = index_content .. files_table(rows, false)
             local page_title = (#header_parts == 0 and "Repositories" or table.concat(header_parts, " / "))
             -- Only created once we know this directory (or a descendant)
             -- actually has something to show -- otherwise every non-repo

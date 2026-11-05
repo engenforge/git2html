@@ -31,7 +31,7 @@ Release tarballs and `SHA256SUMS` are published at:
 - Forge-like appearance (Codeberg/Forgejo style).
 - Output conforms to the [WebVeld specification](https://webveld.org).
 - Reproducible: rebuilding unchanged input produces byte-identical output.
-- Binary files are published verbatim, with a landing page that links to them.
+- Binary files are published verbatim; WebVeld-compatible files like PNG and JPEG are displayed directly, while other binary files receive a download landing page.
 
 ## Requirements
 

@@ -26,6 +26,8 @@ local function build()
         .. " add short.txt && git -C " .. temp_repo .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -m 'Short description' >/dev/null 2>&1")
     os.execute("touch " .. temp_repo .. "/quoted.txt && git -C " .. temp_repo
         .. ' add quoted.txt && git -C ' .. temp_repo .. ' -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -m \'fix: handle "quoted" values in commit messages properly across trees\' >/dev/null 2>&1')
+    os.execute("mkdir -p " .. temp_repo .. "/subdir/deep && touch " .. temp_repo .. "/subdir/subfile " .. temp_repo .. "/subdir/deep/nested && git -C " .. temp_repo
+        .. " add subdir/subfile subdir/deep/nested && git -C " .. temp_repo .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -m 'add subdir and nested' >/dev/null 2>&1")
     os.execute("git -C " .. temp_repo2 .. " init >/dev/null 2>&1")
     os.execute("touch " .. temp_repo2 .. "/f && git -C " .. temp_repo2
         .. " add f && git -C " .. temp_repo2 .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -m 'init' >/dev/null 2>&1")
@@ -111,6 +113,37 @@ runner.test("UI regression: listing table is wrapped in a keyboard-scrollable li
     local html = read(output_dir .. "/git2html-ui-repo/index.html")
     assert(html:match('<div class="listing%-pane" tabindex="0">%s*<table class="listing">'),
         "Listing table is not wrapped in a focusable listing-pane container")
+end)
+
+runner.test("UI regression: only the main landing page has a scrollable list, other pages display without a scroll box", function()
+    -- Main landing page of first repo has listing-pane
+    local main_html = read(output_dir .. "/git2html-ui-repo/index.html")
+    assert(main_html:match('class="listing%-pane"'),
+        "Main repo landing page must have a listing-pane scroll box")
+
+    -- Main landing page of second repo has listing-pane
+    local main_html2 = read(output_dir .. "/git2html-ui-repo2/index.html")
+    assert(main_html2:match('class="listing%-pane"'),
+        "Second repo main landing page must have a listing-pane scroll box")
+
+    -- Subdirectory does NOT have listing-pane
+    local sub_html = read(output_dir .. "/git2html-ui-repo/subdir/index.html")
+    assert(not sub_html:match('class="listing%-pane"'),
+        "Subdirectory listing table should not be wrapped in a listing-pane scroll box")
+    assert(sub_html:match('<table class="listing">'),
+        "Subdirectory should still display the listing table")
+
+    -- Deeply nested subdirectory does NOT have listing-pane
+    local deep_html = read(output_dir .. "/git2html-ui-repo/subdir/deep/index.html")
+    assert(not deep_html:match('class="listing%-pane"'),
+        "Deep subdirectory listing table should not be wrapped in a listing-pane scroll box")
+    assert(deep_html:match('<table class="listing">'),
+        "Deep subdirectory should still display the listing table")
+
+    -- Multi-repo root Repositories index does NOT have listing-pane
+    local root_html = read(output_dir .. "/index.html")
+    assert(not root_html:match('class="listing%-pane"'),
+        "Repositories index table should not be wrapped in a listing-pane scroll box")
 end)
 
 runner.test("UI regression: descriptions longer than 50 characters are truncated with an ellipsis and title attribute", function()
