@@ -135,6 +135,27 @@ h3 { font-size: 1.15rem; margin: 1.5rem 0 0.4rem 0; }
 
 p { margin: 0 0 1.1rem 0; }
 
+.listing-pane {
+	max-height: 25rem;
+	overflow-y: auto;
+	border: 1px solid #e1e4e8;
+	border-radius: 4px;
+	margin-bottom: 1.5rem;
+}
+
+.listing-pane:focus {
+	outline: 2px solid #0366d6;
+	outline-offset: 2px;
+}
+
+.listing-pane .listing {
+	margin-bottom: 0;
+}
+
+.listing-pane .listing tr:last-child td {
+	border-bottom: 0;
+}
+
 .listing {
 	width: 100%;
 	border-collapse: collapse;
@@ -160,7 +181,7 @@ p { margin: 0 0 1.1rem 0; }
 
 
 .col-name { width: 25%; }
-.col-desc { width: 55%; }
+.col-desc { width: 55%; white-space: nowrap; overflow: hidden; }
 .col-changed { width: 20%; white-space: nowrap; }
 .col-hash { width: 12%; }
 .col-date { width: 20%; }

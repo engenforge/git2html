@@ -171,6 +171,27 @@ p {
 
 /* Listings (file trees, repository indexes, commit logs) ------------------- */
 
+.listing-pane {
+	max-height: 25rem;
+	overflow-y: auto;
+	border: 1px solid #e5e7eb;
+	border-radius: 4px;
+	margin-bottom: 1.5rem;
+}
+
+.listing-pane:focus {
+	outline: 2px solid #0969da;
+	outline-offset: 2px;
+}
+
+.listing-pane .listing {
+	margin-bottom: 0;
+}
+
+.listing-pane .listing tr:last-child td {
+	border-bottom: 0;
+}
+
 .listing {
 	width: 100%;
 	border-collapse: collapse;
@@ -207,7 +228,7 @@ p {
 /* Column proportions. Without table-layout these are hints, so a long name
  * wraps rather than being clipped -- which is the behaviour we want anyway. */
 .col-name { width: 25%; }
-.col-desc { width: 55%; }
+.col-desc { width: 55%; white-space: nowrap; overflow: hidden; }
 .col-changed { width: 20%; white-space: nowrap; }
 .col-hash { width: 12%; }
 .col-date { width: 20%; }
@@ -381,6 +402,14 @@ pre code {
 
 	.masthead {
 		border-bottom: 1px solid #2e2e33;
+	}
+
+	.listing-pane {
+		border-color: #2e2e33;
+	}
+
+	.listing-pane:focus {
+		outline-color: #60a5fa;
 	}
 
 	.nav a {

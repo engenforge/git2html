@@ -20,6 +20,12 @@ local function build()
     os.execute("git -C " .. temp_repo .. " init >/dev/null 2>&1")
     os.execute("touch " .. temp_repo .. "/f && git -C " .. temp_repo
         .. " add f && git -C " .. temp_repo .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -m 'init' >/dev/null 2>&1")
+    os.execute("touch " .. temp_repo .. "/long.txt && git -C " .. temp_repo
+        .. " add long.txt && git -C " .. temp_repo .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -m 'This is a very long commit message that definitely exceeds the fifty character limit for description truncation' >/dev/null 2>&1")
+    os.execute("touch " .. temp_repo .. "/short.txt && git -C " .. temp_repo
+        .. " add short.txt && git -C " .. temp_repo .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -m 'Short description' >/dev/null 2>&1")
+    os.execute("touch " .. temp_repo .. "/quoted.txt && git -C " .. temp_repo
+        .. ' add quoted.txt && git -C ' .. temp_repo .. ' -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -m \'fix: handle "quoted" values in commit messages properly across trees\' >/dev/null 2>&1')
     os.execute("git -C " .. temp_repo2 .. " init >/dev/null 2>&1")
     os.execute("touch " .. temp_repo2 .. "/f && git -C " .. temp_repo2
         .. " add f && git -C " .. temp_repo2 .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -m 'init' >/dev/null 2>&1")
@@ -99,6 +105,26 @@ runner.test("UI regression: source views are keyboard-scrollable", function()
     -- keyboard-only reader cannot reach the clipped half (spec section 5.1).
     local html = read(output_dir .. "/git2html-ui-repo/f.html")
     assert(html:match('<pre tabindex="0">'), "Code block is not focusable")
+end)
+
+runner.test("UI regression: listing table is wrapped in a keyboard-scrollable listing-pane", function()
+    local html = read(output_dir .. "/git2html-ui-repo/index.html")
+    assert(html:match('<div class="listing%-pane" tabindex="0">%s*<table class="listing">'),
+        "Listing table is not wrapped in a focusable listing-pane container")
+end)
+
+runner.test("UI regression: descriptions longer than 50 characters are truncated with an ellipsis and title attribute", function()
+    local html = read(output_dir .. "/git2html-ui-repo/index.html")
+    assert(html:match('<td class="col%-desc" title="This is a very long commit message that definitely exceeds the fifty character limit for description truncation">This is a very long commit message that definit%.%.%.</td>'),
+        "Long description was not truncated with title attribute")
+    assert(html:match('<td class="col%-desc">Short description</td>'),
+        "Short description was unexpectedly truncated or altered")
+end)
+
+runner.test("UI regression: title attribute escapes double quotes properly", function()
+    local html = read(output_dir .. "/git2html-ui-repo/index.html")
+    assert(html:match('title="fix: handle &quot;quoted&quot; values in commit messages properly across trees"'),
+        "Quotes inside description title attribute were not escaped")
 end)
 
 os.execute("rm -rf " .. output_dir .. " " .. root_dir)

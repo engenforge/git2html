@@ -129,6 +129,47 @@ local function html_escape(s)
     return (s:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
 end
 
+local function attr_escape(s)
+    return html_escape(s):gsub('"', "&quot;")
+end
+
+local function truncate_desc(desc, max_chars)
+    if not desc then return "" end
+    max_chars = max_chars or 50
+    if max_chars <= 3 then
+        return desc:sub(1, max_chars)
+    end
+    local len = utf8.len(desc)
+    if not len then
+        if #desc > max_chars then
+            return desc:sub(1, max_chars - 3) .. "..."
+        end
+        return desc
+    end
+    if len > max_chars then
+        local offset = utf8.offset(desc, max_chars - 2)
+        if offset then
+            return desc:sub(1, offset - 1) .. "..."
+        else
+            return desc:sub(1, max_chars - 3) .. "..."
+        end
+    end
+    return desc
+end
+
+local function format_description(desc)
+    if not desc or desc == "" or desc == "-" then
+        return '<td class="col-desc">-</td>'
+    end
+    desc = desc:gsub("[\r\n]+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+    local truncated = truncate_desc(desc, 50)
+    if truncated ~= desc then
+        return string.format('<td class="col-desc" title="%s">%s</td>', attr_escape(desc), html_escape(truncated))
+    else
+        return string.format('<td class="col-desc">%s</td>', html_escape(desc))
+    end
+end
+
 local function hl_to_html(code, lang)
     if not lang then lang = "text" end
     lang = lang_map[lang] or lang
@@ -465,12 +506,14 @@ end
 -- constraints, so long names wrap instead of being clipped to an ellipsis --
 -- which keeps the content readable rather than truncating it.
 local function files_table(rows)
-    return '<table class="listing">' .. CI
+    return '<div class="listing-pane" tabindex="0">' .. CI
+        .. '<table class="listing">' .. CI
         .. '<colgroup><col class="col-name"><col class="col-desc"><col class="col-changed"></colgroup>' .. CI
         .. '<thead><tr><th>Name</th><th>Description</th><th>Last Changed</th></tr></thead>' .. CI
         .. '<tbody>' .. rows .. CI
         .. '</tbody>' .. CI
-        .. '</table>'
+        .. '</table>' .. CI
+        .. '</div>'
 end
 
 local function log_table(rows)
@@ -562,9 +605,9 @@ local function generate_parent_indexes(output_root, header_parts, theme)
             for _ = 1, i do rel_to_root = rel_to_root .. "../" end
             
             local next_part = header_parts[i+1]
-            local rows = RI .. string.format('<tr><td><a href="%s/index.html">%s/</a></td><td>-</td><td>-</td></tr>', next_part, next_part)
+            local rows = RI .. string.format('<tr><td><a href="%s/index.html">%s/</a></td><td class="col-desc">-</td><td class="col-changed">-</td></tr>', next_part, next_part)
             if i > 0 then
-                rows = RI .. '<tr><td><a href="../index.html">..</a></td><td>-</td><td>-</td></tr>' .. rows
+                rows = RI .. '<tr><td><a href="../index.html">..</a></td><td class="col-desc">-</td><td class="col-changed">-</td></tr>' .. rows
             end
 
             -- At the root, the nav's "Repositories" link already says this is
@@ -651,20 +694,20 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir)
 
     local rows = ""
     if subdir ~= "" then
-        rows = rows .. RI .. '<tr><td><a href="../index.html">..</a></td><td>-</td><td>-</td></tr>'
+        rows = rows .. RI .. '<tr><td><a href="../index.html">..</a></td><td class="col-desc">-</td><td class="col-changed">-</td></tr>'
     end
 
     for _, f in ipairs(files) do
         local name = f.path:match("([^/]+)$") or f.path
-        local desc = f.description and html_escape(f.description) or "-"
+        local desc_td = format_description(f.description)
         if f.is_dir then
-            rows = rows .. RI .. string.format('<tr><td><a href="%s/index.html">%s/</a></td><td>%s</td><td class="col-changed">%s</td></tr>', name, name, desc, f.last_changed)
+            rows = rows .. RI .. string.format('<tr><td><a href="%s/index.html">%s/</a></td>%s<td class="col-changed">%s</td></tr>', name, name, desc_td, f.last_changed)
             register_expected_dir(output_dir .. "/" .. f.path)
             os.execute("mkdir -p " .. output_dir .. "/" .. f.path)
             generate_repo_tree(repo_path, output_dir, header_parts, f.path)
         else
             local file_view_path = name .. ".html"
-            rows = rows .. RI .. string.format('<tr><td><a href="%s">%s</a></td><td>%s</td><td class="col-changed">%s</td></tr>', file_view_path, name, desc, f.last_changed)
+            rows = rows .. RI .. string.format('<tr><td><a href="%s">%s</a></td>%s<td class="col-changed">%s</td></tr>', file_view_path, name, desc_td, f.last_changed)
             
             local source = repo_path .. "/" .. f.path
 
@@ -858,7 +901,7 @@ local function walk_and_process(current_path, output_root, strip_path, theme)
 
             local rows = ""
             if #header_parts > 0 then
-                rows = rows .. RI .. '<tr><td><a href="../index.html">..</a></td><td>-</td><td>-</td></tr>'
+                rows = rows .. RI .. '<tr><td><a href="../index.html">..</a></td><td class="col-desc">-</td><td class="col-changed">-</td></tr>'
             end
 
             table.sort(children, function(a, b) return a.name < b.name end)
@@ -866,8 +909,8 @@ local function walk_and_process(current_path, output_root, strip_path, theme)
             for _, child in ipairs(children) do
                 local link = child.rel .. "/index.html"
                 local suffix = (child.type == "dir" and "/" or "")
-                local desc = child.description and html_escape(child.description) or "-"
-                rows = rows .. RI .. string.format('<tr><td><a href="%s">%s%s</a></td><td>%s</td><td class="col-changed">%s</td></tr>', link, child.name, suffix, desc, child.age or "-")
+                local desc_td = format_description(child.description)
+                rows = rows .. RI .. string.format('<tr><td><a href="%s">%s%s</a></td>%s<td class="col-changed">%s</td></tr>', link, child.name, suffix, desc_td, child.age or "-")
             end
 
             -- Same nav-only-at-root rule as generate_parent_indexes: skip
