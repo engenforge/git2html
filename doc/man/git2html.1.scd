@@ -6,7 +6,7 @@ git2html - generate static HTML from a git repository
 
 # SYNOPSIS
 
-*git2html* [-v] [-Q] [-c <clone-url-base>] [-r <release-url-base>] [-f <footer-file>] [-h <header-file>] [-l <lang>] [-t <theme>] <repo-path-or-url> <output-dir> [strip-path] [theme]
+*git2html* [-v] [-Q] [-p] [-c <clone-url-base>] [-r <release-url-base>] [-f <footer-file>] [-h <header-file>] [-l <lang>] [-t <theme>] <repo-path-or-url> <output-dir> [strip-path] [theme]
 
 # DESCRIPTION
 
@@ -32,6 +32,10 @@ The generated site includes:
 	Quiet mode. Suppresses all normal output, including the progress lines
 	printed by default and the final completion message. Errors are still
 	reported.
+
+*-p*, *--prune*
+	Remove files and empty directories in the destination that are not part
+	of what is generated.
 
 *-c* <clone-url-base>
 	Show a "Git clone via ..." line above the file listing on each
@@ -102,6 +106,14 @@ default placeholder as no description and shows *No description provided.*
 in its place. Replace its contents with a real summary to have it appear:
 
 	echo "A one-line summary" > myrepo/.git/description
+
+# INCREMENTAL BUILDS
+
+If an output file already exists in the destination and has a modification
+timestamp newer than its corresponding source file, *git2html* skips
+regenerating it. If the source file has been modified since the output was
+last generated, the output file is rebuilt. Combined with *-p*, *git2html*
+performs clean, fast incremental site generation.
 
 # REPRODUCIBILITY
 

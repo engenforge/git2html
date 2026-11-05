@@ -288,7 +288,77 @@ local function is_binary(path)
     return chunk:find("\0", 1, true) ~= nil
 end
 
+local function sh_quote(s)
+    return "'" .. s:gsub("'", "'\\''") .. "'"
+end
+
+local function normalize_path(p)
+    p = p:gsub("/+", "/")
+    if #p > 1 and p:sub(-1) == "/" then
+        p = p:sub(1, -2)
+    end
+    return p
+end
+
+local function is_newer(target, source)
+    return exec_ok("test -f " .. sh_quote(target) .. " && test -e " .. sh_quote(source) .. " && test " .. sh_quote(target) .. " -nt " .. sh_quote(source))
+end
+
+local expected_files = {}
+local expected_dirs = {}
+
+local function register_expected_file(path)
+    local norm = normalize_path(path)
+    expected_files[norm] = true
+    local dir = norm:match("^(.*)/[^/]+$")
+    while dir and dir ~= "" do
+        expected_dirs[dir] = true
+        dir = dir:match("^(.*)/[^/]+$")
+    end
+end
+
+local function register_expected_dir(path)
+    local norm = normalize_path(path)
+    local dir = norm
+    while dir and dir ~= "" do
+        expected_dirs[dir] = true
+        dir = dir:match("^(.*)/[^/]+$")
+    end
+end
+
+local function clean_destination_tree(output_root)
+    local norm_root = normalize_path(output_root)
+    -- Remove any files or non-directories not registered in expected_files
+    local p = io.popen("find " .. sh_quote(norm_root) .. " ! -type d -print0 2>/dev/null")
+    if p then
+        local content = p:read("*all")
+        p:close()
+        for path in content:gmatch("[^\0]+") do
+            local norm = normalize_path(path)
+            if not expected_files[norm] then
+                log("    Removing: " .. norm)
+                os.remove(norm)
+            end
+        end
+    end
+
+    -- Remove any directories not registered in expected_dirs (depth-first)
+    local pd = io.popen("find " .. sh_quote(norm_root) .. " -depth -mindepth 1 -type d -print0 2>/dev/null")
+    if pd then
+        local content = pd:read("*all")
+        pd:close()
+        for path in content:gmatch("[^\0]+") do
+            local norm = normalize_path(path)
+            if not expected_dirs[norm] then
+                log("    Removing: " .. norm)
+                os.remove(norm)
+            end
+        end
+    end
+end
+
 local function copy_file(src, dest)
+    register_expected_file(dest)
     local i = io.open(src, "rb")
     if not i then return false end
     local o = io.open(dest, "wb")
@@ -318,6 +388,7 @@ local function read_file(path)
 end
 
 local function write_file(path, content)
+    register_expected_file(path)
     local f = io.open(path, "w")
     if not f then return false end
     f:write(content)
@@ -329,6 +400,11 @@ end
 -- binary by the static-build bundler (see src/bundle_main.c) -- the latter
 -- has no file to `cp`, so it's written out directly instead.
 local function install_theme(theme, dest)
+    register_expected_file(dest)
+    if theme.path and is_newer(dest, theme.path) then
+        log("    Skipping: " .. dest)
+        return
+    end
     if theme.content then
         write_file(dest, theme.content)
     else
@@ -480,6 +556,7 @@ local function generate_parent_indexes(output_root, header_parts, theme)
             
             local rel_output = table.concat(parts, "/")
             local target_output = output_root .. (rel_output == "" and "" or "/" .. rel_output)
+            register_expected_dir(target_output)
             os.execute("mkdir -p " .. target_output)
             local rel_to_root = ""
             for _ = 1, i do rel_to_root = rel_to_root .. "../" end
@@ -582,6 +659,7 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir)
         local desc = f.description and html_escape(f.description) or "-"
         if f.is_dir then
             rows = rows .. RI .. string.format('<tr><td><a href="%s/index.html">%s/</a></td><td>%s</td><td class="col-changed">%s</td></tr>', name, name, desc, f.last_changed)
+            register_expected_dir(output_dir .. "/" .. f.path)
             os.execute("mkdir -p " .. output_dir .. "/" .. f.path)
             generate_repo_tree(repo_path, output_dir, header_parts, f.path)
         else
@@ -593,47 +671,67 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir)
             if is_binary(source) then
                 -- Published verbatim, with a landing page describing it, so a
                 -- reader can download it and a README can link to it.
-                log("    Copying: " .. f.path)
-                copy_file(source, output_dir .. "/" .. f.path)
+                local binary_target = output_dir .. "/" .. f.path
+                local html_target = output_dir .. "/" .. f.path .. ".html"
+                register_expected_file(binary_target)
+                register_expected_file(html_target)
 
-                local size = 0
-                local probe = io.open(source, "rb")
-                if probe then size = probe:seek("end") probe:close() end
+                if is_newer(binary_target, source) then
+                    log("    Skipping: " .. f.path)
+                else
+                    log("    Copying: " .. f.path)
+                    copy_file(source, binary_target)
+                end
 
-                local file_breadcrumbs = breadcrumbs .. " / " .. name
-                local body = string.format(
-                    '<h2>%s</h2>' .. CI .. '<p class="meta">Binary file, %s.</p>' .. CI
-                    .. '<p><a href="%s">Download %s</a></p>',
-                    file_breadcrumbs, human_size(size), name, name)
-                write_file(output_dir .. "/" .. f.path .. ".html",
-                    repo_template(header_parts, display_name .. " - " .. f.path,
-                        body, rel_to_root))
-            else
-                local content = read_file(source)
-                if content then
-                    log("    Rendering: " .. f.path)
-                    local extension = name:match("%.([^%.]+)$")
-                    local is_markdown = (extension == "md" or extension == "markdown")
-                    local html_content
-                    if is_markdown then
-                        html_content = "<div class=\"readme\">" .. rewrite_md_links(md(content)) .. "</div>"
-                    else
-                        local lang = extension
-                        if not lang then
-                            if name:lower() == "makefile" then lang = "makefile"
-                            elseif name:lower() == "dockerfile" then lang = "dockerfile"
-                            end
-                        end
-                        -- overflow-x on pre makes a wide block a scrollable region,
-                        -- and a scrollable region that cannot be focused cannot be
-                        -- scrolled without a pointer. tabindex="0" puts it in the
-                        -- tab order, which is what spec section 5.1 admits the
-                        -- attribute for.
-                        html_content = '<pre tabindex="0"><code>' .. hl_to_html(content, lang) .. "</code></pre>"
-                    end
+                if is_newer(html_target, source) then
+                    log("    Skipping: " .. f.path .. ".html")
+                else
+                    local size = 0
+                    local probe = io.open(source, "rb")
+                    if probe then size = probe:seek("end") probe:close() end
 
                     local file_breadcrumbs = breadcrumbs .. " / " .. name
-                    write_file(output_dir .. "/" .. f.path .. ".html", repo_template(header_parts, display_name .. " - " .. f.path, "<h2>" .. file_breadcrumbs .. "</h2>" .. CI .. html_content, rel_to_root))
+                    local body = string.format(
+                        '<h2>%s</h2>' .. CI .. '<p class="meta">Binary file, %s.</p>' .. CI
+                        .. '<p><a href="%s">Download %s</a></p>',
+                        file_breadcrumbs, human_size(size), name, name)
+                    write_file(html_target,
+                        repo_template(header_parts, display_name .. " - " .. f.path,
+                            body, rel_to_root))
+                end
+            else
+                local html_target = output_dir .. "/" .. f.path .. ".html"
+                register_expected_file(html_target)
+
+                if is_newer(html_target, source) then
+                    log("    Skipping: " .. f.path)
+                else
+                    local content = read_file(source)
+                    if content then
+                        log("    Rendering: " .. f.path)
+                        local extension = name:match("%.([^%.]+)$")
+                        local is_markdown = (extension == "md" or extension == "markdown")
+                        local html_content
+                        if is_markdown then
+                            html_content = "<div class=\"readme\">" .. rewrite_md_links(md(content)) .. "</div>"
+                        else
+                            local lang = extension
+                            if not lang then
+                                if name:lower() == "makefile" then lang = "makefile"
+                                elseif name:lower() == "dockerfile" then lang = "dockerfile"
+                                end
+                            end
+                            -- overflow-x on pre makes a wide block a scrollable region,
+                            -- and a scrollable region that cannot be focused cannot be
+                            -- scrolled without a pointer. tabindex="0" puts it in the
+                            -- tab order, which is what spec section 5.1 admits the
+                            -- attribute for.
+                            html_content = '<pre tabindex="0"><code>' .. hl_to_html(content, lang) .. "</code></pre>"
+                        end
+
+                        local file_breadcrumbs = breadcrumbs .. " / " .. name
+                        write_file(html_target, repo_template(header_parts, display_name .. " - " .. f.path, "<h2>" .. file_breadcrumbs .. "</h2>" .. CI .. html_content, rel_to_root))
+                    end
                 end
             end
         end
@@ -663,6 +761,7 @@ end
 
 local function generate_repo_site(repo_path, target_output, header_parts, theme, output_root)
     progress("Processing repository: " .. table.concat(header_parts, " / "))
+    register_expected_dir(target_output)
     os.execute("mkdir -p " .. target_output)
 
     -- One style sheet per repository, not per directory. The repository is the
@@ -781,6 +880,7 @@ local function walk_and_process(current_path, output_root, strip_path, theme)
             -- folder in the walked tree would be mirrored into the output
             -- as an empty directory.
             if #header_parts > 0 or has_multiple_repos then
+                register_expected_dir(target_output)
                 os.execute("mkdir -p " .. target_output)
                 write_file(target_output .. "/index.html", template(page_title, index_content, rel_to_root))
             end
@@ -793,6 +893,7 @@ end
 local function main(raw_args)
     local args = {}
     local theme_flag = nil
+    local clean_dest = false
     local i = 1
     while i <= #raw_args do
         local arg = raw_args[i]
@@ -800,6 +901,8 @@ local function main(raw_args)
             verbose = true
         elseif arg == "-Q" or arg == "--quiet" then
             quiet = true
+        elseif arg == "-p" or arg == "--prune" then
+            clean_dest = true
         elseif arg == "-c" then
             clone_url_base = raw_args[i+1]
             i = i + 1
@@ -825,7 +928,7 @@ local function main(raw_args)
     end
 
     if #args < 2 then
-        print("Usage: git2html [-v] [-Q|--quiet] [-c clone-url-base] [-r release-url-base] [-f footer-file] [-h header-file] [-l lang] [-t theme] <repo-path-or-url> <output-dir> [strip-path] [theme]")
+        print("Usage: git2html [-v] [-Q|--quiet] [-p|--prune] [-c clone-url-base] [-r release-url-base] [-f footer-file] [-h header-file] [-l lang] [-t theme] <repo-path-or-url> <output-dir> [strip-path] [theme]")
         os.exit(1)
     end
 
@@ -846,6 +949,8 @@ local function main(raw_args)
         local pwd = io.popen("pwd"):read("*line")
         output_dir = pwd .. "/" .. output_dir
     end
+    output_dir = normalize_path(output_dir)
+    register_expected_dir(output_dir)
 
     -- Theme selection
     local theme
@@ -957,6 +1062,10 @@ local function main(raw_args)
         end
     end
     
+    if clean_dest then
+        clean_destination_tree(output_dir)
+    end
+
     progress("Done! Static site generated in " .. output_dir)
 end
 

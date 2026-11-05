@@ -13,7 +13,7 @@ git2html \- generate static HTML from a git repository
 .PP
 .SH SYNOPSIS
 .PP
-\fBgit2html\fR [\-v] [\-Q] [\-c <clone\-url\-base>] [\-r <release\-url\-base>] [\-f <footer\-file>] [\-h <header\-file>] [\-l <lang>] [\-t <theme>] <repo\-path\-or\-url> <output\-dir> [strip\-path] [theme]
+\fBgit2html\fR [\-v] [\-Q] [\-p] [\-c <clone\-url\-base>] [\-r <release\-url\-base>] [\-f <footer\-file>] [\-h <header\-file>] [\-l <lang>] [\-t <theme>] <repo\-path\-or\-url> <output\-dir> [strip\-path] [theme]
 .PP
 .SH DESCRIPTION
 .PP
@@ -48,6 +48,12 @@ Increase verbosity.\& Prints incremental steps during generation.\&
 Quiet mode.\& Suppresses all normal output, including the progress lines
 printed by default and the final completion message.\& Errors are still
 reported.\&
+.PP
+.RE
+\fB\-p\fR, \fB\-\-prune\fR
+.RS 4
+Remove files and empty directories in the destination that are not part
+of what is generated.\&
 .PP
 .RE
 \fB\-c\fR <clone\-url\-base>
@@ -142,6 +148,14 @@ in its place.\& Replace its contents with a real summary to have it appear:
 echo "A one\-line summary" > myrepo/.\&git/description
 .PP
 .RE
+.SH INCREMENTAL BUILDS
+.PP
+If an output file already exists in the destination and has a modification
+timestamp newer than its corresponding source file, \fBgit2html\fR skips
+regenerating it.\& If the source file has been modified since the output was
+last generated, the output file is rebuilt.\& Combined with \fB\-p\fR, \fBgit2html\fR
+performs clean, fast incremental site generation.\&
+.PP
 .SH REPRODUCIBILITY
 .PP
 Output is a function of the repository, not of the clock.\& The generation date
