@@ -5,8 +5,10 @@
  * executable with no run-time dependency on the system's Lua install or any
  * sibling files on disk.
  */
+#define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "lua.h"
 #include "lauxlib.h"
@@ -15,6 +17,26 @@
 #include "bundle_data.h"
 
 int luaopen_lpeg(lua_State *L);
+
+static int l_c_is_newer(lua_State *L) {
+    const char *target = luaL_checkstring(L, 1);
+    const char *source = luaL_checkstring(L, 2);
+    struct stat st_t, st_s;
+    if (stat(target, &st_t) != 0 || stat(source, &st_s) != 0) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    if (st_t.st_mtim.tv_sec > st_s.st_mtim.tv_sec) {
+        lua_pushboolean(L, 1);
+        return 1;
+    }
+    if (st_t.st_mtim.tv_sec == st_s.st_mtim.tv_sec && st_t.st_mtim.tv_nsec >= st_s.st_mtim.tv_nsec) {
+        lua_pushboolean(L, 1);
+        return 1;
+    }
+    lua_pushboolean(L, 0);
+    return 1;
+}
 
 /*
  * vendor/syntaxhighlight's per-language lexer loader (init.lua, and
@@ -65,6 +87,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     luaL_openlibs(L);
+    lua_register(L, "c_is_newer", l_c_is_newer);
 
     luaL_requiref(L, "lpeg", luaopen_lpeg, 0);
     lua_pop(L, 1);

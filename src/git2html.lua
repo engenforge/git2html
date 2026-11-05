@@ -341,7 +341,19 @@ local function normalize_path(p)
     return p
 end
 
+local function file_exists(path)
+    local f = io.open(path, "rb")
+    if f then
+        f:close()
+        return true
+    end
+    return false
+end
+
 local function is_newer(target, source)
+    if _G.c_is_newer then
+        return _G.c_is_newer(target, source)
+    end
     return exec_ok("test -f " .. sh_quote(target) .. " && test -e " .. sh_quote(source) .. " && test " .. sh_quote(target) .. " -nt " .. sh_quote(source))
 end
 
@@ -365,6 +377,65 @@ local function register_expected_dir(path)
         expected_dirs[dir] = true
         dir = dir:match("^(.*)/[^/]+$")
     end
+end
+
+local function verify_and_register_repo_expected(repo_path, target_output)
+    if not file_exists(target_output .. "/style.css") or
+       not file_exists(target_output .. "/log.html") or
+       not file_exists(target_output .. "/index.html") or
+       not file_exists(target_output .. "/.git2html_head") then
+        return false
+    end
+
+    local cmd = string.format("git -C %q ls-tree -r -t HEAD", repo_path)
+    local handle = io.popen(cmd)
+    if not handle then return false end
+    
+    local all_exist = true
+    local items = {}
+    for line in handle:lines() do
+        local mode, type, hash, path = line:match("(%d+) (%a+) (%w+)%s+(.*)")
+        if path then
+            table.insert(items, { type = type, path = path })
+            if type == "tree" then
+                if not file_exists(target_output .. "/" .. path .. "/index.html") then
+                    all_exist = false
+                    break
+                end
+            elseif type == "blob" then
+                if not file_exists(target_output .. "/" .. path .. ".html") then
+                    all_exist = false
+                    break
+                end
+            end
+        end
+    end
+    handle:close()
+
+    if not all_exist then
+        return false
+    end
+
+    register_expected_dir(target_output)
+    register_expected_file(target_output .. "/style.css")
+    register_expected_file(target_output .. "/log.html")
+    register_expected_file(target_output .. "/index.html")
+    register_expected_file(target_output .. "/.git2html_head")
+
+    for _, it in ipairs(items) do
+        if it.type == "tree" then
+            register_expected_dir(target_output .. "/" .. it.path)
+            register_expected_file(target_output .. "/" .. it.path .. "/index.html")
+        elseif it.type == "blob" then
+            register_expected_file(target_output .. "/" .. it.path .. ".html")
+            local bin_path = target_output .. "/" .. it.path
+            if file_exists(bin_path) then
+                register_expected_file(bin_path)
+            end
+        end
+    end
+
+    return true
 end
 
 local function clean_destination_tree(output_root)
@@ -430,6 +501,10 @@ end
 
 local function write_file(path, content)
     register_expected_file(path)
+    local existing = read_file(path)
+    if existing == content then
+        return true
+    end
     local f = io.open(path, "w")
     if not f then return false end
     f:write(content)
@@ -672,10 +747,10 @@ local function repo_template(header_parts, page_title, content, rel_path)
 ]], site_lang, page_title, rel_path, get_header(), nav_prefix, rel_path, repo_name, rel_path, content, get_footer())
 end
 
-local function generate_repo_tree(repo_path, output_dir, header_parts, subdir)
+local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, metadata)
     subdir = subdir or ""
     progress("  Walking tree: " .. (subdir == "" and "[root]" or subdir))
-    local files = git.ls_files(repo_path, subdir)
+    local files = git.ls_files(repo_path, subdir, metadata)
     
     table.sort(files, function(a, b)
         if a.is_dir ~= b.is_dir then return a.is_dir end
@@ -704,7 +779,7 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir)
             rows = rows .. RI .. string.format('<tr><td><a href="%s/index.html">%s/</a></td>%s<td class="col-changed">%s</td></tr>', name, name, desc_td, f.last_changed)
             register_expected_dir(output_dir .. "/" .. f.path)
             os.execute("mkdir -p " .. output_dir .. "/" .. f.path)
-            generate_repo_tree(repo_path, output_dir, header_parts, f.path)
+            generate_repo_tree(repo_path, output_dir, header_parts, f.path, metadata)
         else
             local file_view_path = name .. ".html"
             rows = rows .. RI .. string.format('<tr><td><a href="%s">%s</a></td>%s<td class="col-changed">%s</td></tr>', file_view_path, name, desc_td, f.last_changed)
@@ -807,10 +882,20 @@ local function generate_repo_site(repo_path, target_output, header_parts, theme,
     register_expected_dir(target_output)
     os.execute("mkdir -p " .. target_output)
 
-    -- One style sheet per repository, not per directory. The repository is the
-    -- unit a theme applies to -- a caller publishing several repositories may
-    -- want a different theme for each -- while the directories inside one
-    -- share it and link to it relatively.
+    local head_marker_file = target_output .. "/.git2html_head"
+    register_expected_file(head_marker_file)
+    local current_head = git.get_head(repo_path)
+    local theme_str = type(theme) == "table" and (theme.path or (theme.content and #theme.content) or "") or tostring(theme or "")
+    local cache_key = (current_head or "") .. ":" .. theme_str .. ":" .. (clone_url_base or "") .. ":" .. (release_url_base or "")
+    local cached_key = read_file(head_marker_file)
+
+    if not verbose and current_head and cached_key == cache_key and not git.is_dirty(repo_path) and file_exists(target_output .. "/index.html") then
+        if verify_and_register_repo_expected(repo_path, target_output) then
+            generate_parent_indexes(output_root, header_parts, theme)
+            return
+        end
+    end
+
     install_theme(theme, target_output .. "/style.css")
 
     generate_parent_indexes(output_root, header_parts, theme)
@@ -825,7 +910,12 @@ local function generate_repo_site(repo_path, target_output, header_parts, theme,
     write_file(target_output .. "/log.html", repo_template(header_parts, header_parts[#header_parts] .. " - Log", log_html))
     
     -- Recursive Tree
-    generate_repo_tree(repo_path, target_output, header_parts, "")
+    local metadata = git.get_bulk_metadata(repo_path)
+    generate_repo_tree(repo_path, target_output, header_parts, "", metadata)
+
+    if current_head then
+        write_file(head_marker_file, cache_key)
+    end
 end
 
 local function count_direct_repos(dir, strip)

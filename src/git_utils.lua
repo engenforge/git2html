@@ -63,7 +63,61 @@ function git.prepare_repo(input, temp_dir)
     end
 end
 
-function git.ls_files(path, subdir)
+function git.get_head(path)
+    local cmd = string.format("git -C %q rev-parse HEAD 2>/dev/null", path)
+    local handle = io.popen(cmd)
+    if not handle then return nil end
+    local head = handle:read("*line")
+    handle:close()
+    return head
+end
+
+function git.is_dirty(path)
+    local cmd = string.format("git -C %q status --porcelain 2>/dev/null", path)
+    local handle = io.popen(cmd)
+    if not handle then return true end
+    local first_line = handle:read("*line")
+    handle:close()
+    return (first_line ~= nil and first_line ~= "")
+end
+
+function git.get_bulk_metadata(path)
+    -- Walk commit log once to get the latest commit date and description for every file and directory
+    local cmd = string.format("git -C %q log --format=format:'COMMIT\31%%ad\31%%s' --name-only --date=format:'%%Y-%%m-%%d'", path)
+    local handle = io.popen(cmd)
+    if not handle then return {} end
+    local meta = {}
+    local cur_date = ""
+    local cur_desc = ""
+    for line in handle:lines() do
+        if line:sub(1, 7) == "COMMIT\31" then
+            local p1 = line:find("\31", 8, true)
+            if p1 then
+                cur_date = line:sub(8, p1 - 1)
+                cur_desc = line:sub(p1 + 1)
+            else
+                cur_date = line:sub(8)
+                cur_desc = ""
+            end
+        elseif line ~= "" then
+            if not meta[line] then
+                meta[line] = { last_changed = cur_date, description = cur_desc }
+            end
+            local slash = line:find("/", 1, true)
+            while slash do
+                local dir = line:sub(1, slash - 1)
+                if not meta[dir] then
+                    meta[dir] = { last_changed = cur_date, description = cur_desc }
+                end
+                slash = line:find("/", slash + 1, true)
+            end
+        end
+    end
+    handle:close()
+    return meta
+end
+
+function git.ls_files(path, subdir, metadata)
     local ref = "HEAD"
     local tree_path = "."
     if subdir and subdir ~= "" then
@@ -79,17 +133,18 @@ function git.ls_files(path, subdir)
         -- Format: 100644 blob <hash>    <path>
         local mode, type, hash, file_path = line:match("(%d+) (%a+) (%w+)%s+(.*)")
         if file_path and (type == "blob" or type == "tree") then
-            -- Get last changed date and the subject of the commit that made
-            -- it, in one git log call -- %x1f is a literal unit-separator
-            -- byte, not something a commit subject would ever contain, so
-            -- it's a safe field delimiter.
-            local age_cmd = string.format("git -C %q log -1 --format=%%ad%%x1f%%s --date=format:'%%Y-%%m-%%d' -- %q", path, file_path)
-            local age_handle = io.popen(age_cmd)
-            local line = age_handle:read("*line")
-            age_handle:close()
             local last_changed, description
-            if line then
-                last_changed, description = line:match("^(.-)\31(.*)$")
+            if metadata and metadata[file_path] then
+                last_changed = metadata[file_path].last_changed
+                description = metadata[file_path].description
+            else
+                local age_cmd = string.format("git -C %q log -1 --format=%%ad%%x1f%%s --date=format:'%%Y-%%m-%%d' -- %q", path, file_path)
+                local age_handle = io.popen(age_cmd)
+                local line = age_handle:read("*line")
+                age_handle:close()
+                if line then
+                    last_changed, description = line:match("^(.-)\31(.*)$")
+                end
             end
 
             table.insert(files, {

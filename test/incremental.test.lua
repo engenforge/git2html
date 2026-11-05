@@ -173,5 +173,100 @@ runner.test("-p and --prune prune extraneous files", function()
     cleanup()
 end)
 
+runner.test("repeat build on clean repo skips re-walking and preserves output", function()
+    setup_repo()
+    run_g2h()
+
+    local marker = out .. "/git2html-incr-repo/.git2html_head"
+    assert(os.execute("test -f " .. marker), "head marker file should exist after first run")
+
+    -- Second run without flags (default mode)
+    local text = run_g2h()
+    assert(not text:find("Walking tree", 1, true), "clean repeat build should not re-walk the tree:\n" .. text)
+
+    -- All outputs must remain intact
+    local repo_out = out .. "/git2html-incr-repo"
+    assert(os.execute("test -f " .. repo_out .. "/index.html"), "repo index.html must remain intact")
+    assert(os.execute("test -f " .. repo_out .. "/src/main.lua.html"), "src/main.lua.html must remain intact")
+
+    cleanup()
+end)
+
+runner.test("rebuilds properly and quickly when files are deleted from output", function()
+    setup_repo()
+    -- Add multiple files to have several files in repo
+    os.execute("echo 'util = {}' > " .. repo .. "/src/util.lua")
+    os.execute("echo 'config = {}' > " .. repo .. "/src/config.lua")
+    os.execute("mkdir -p " .. repo .. "/doc")
+    os.execute("echo '# Manual' > " .. repo .. "/doc/manual.md")
+    os.execute("git -C " .. repo .. " add -A >/dev/null 2>&1")
+    os.execute("git -C " .. repo .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -qm 'add more files' >/dev/null 2>&1")
+
+    -- First run generates all outputs
+    run_g2h()
+
+    local repo_out = out .. "/git2html-incr-repo"
+    local f1 = repo_out .. "/src/util.lua.html"
+    local f2 = repo_out .. "/doc/manual.md.html"
+    assert(os.execute("test -f " .. f1), "f1 should exist after first run")
+    assert(os.execute("test -f " .. f2), "f2 should exist after first run")
+
+    -- Delete the two files in the output
+    os.remove(f1)
+    os.remove(f2)
+    assert(not os.execute("test -f " .. f1), "f1 should be deleted")
+    assert(not os.execute("test -f " .. f2), "f2 should be deleted")
+
+    -- Second run rebuilds
+    local text = run_g2h("-v")
+
+    -- Missing files must be regenerated properly
+    assert(os.execute("test -f " .. f1), "f1 should be regenerated")
+    assert(os.execute("test -f " .. f2), "f2 should be regenerated")
+
+    -- Check that existing unchanged files were skipped in -v output and only missing files were rendered
+    assert(text:find("Skipping: src/main.lua", 1, true), "unchanged file should be skipped")
+    assert(text:find("Rendering: src/util.lua", 1, true), "deleted file should be rendered")
+    assert(text:find("Rendering: doc/manual.md", 1, true), "deleted file should be rendered")
+
+    cleanup()
+end)
+
+runner.test("prune properly removes spurious files added in output folder", function()
+    setup_repo()
+    run_g2h()
+
+    local repo_out = out .. "/git2html-incr-repo"
+    local spurious1 = repo_out .. "/spurious_file.tmp"
+    local spurious2 = repo_out .. "/src/random_artifact.bak"
+    local spurious_dir = repo_out .. "/unexpected_folder"
+    local spurious3 = spurious_dir .. "/stray.data"
+
+    os.execute("mkdir -p " .. spurious_dir)
+    os.execute("touch " .. spurious1)
+    os.execute("touch " .. spurious2)
+    os.execute("touch " .. spurious3)
+
+    assert(os.execute("test -f " .. spurious1), "spurious1 should exist before prune")
+    assert(os.execute("test -f " .. spurious2), "spurious2 should exist before prune")
+    assert(os.execute("test -f " .. spurious3), "spurious3 should exist before prune")
+
+    -- Run with --prune
+    run_g2h("--prune")
+
+    assert(not os.execute("test -f " .. spurious1), "spurious1 should be removed by prune")
+    assert(not os.execute("test -f " .. spurious2), "spurious2 should be removed by prune")
+    assert(not os.execute("test -f " .. spurious3), "spurious3 should be removed by prune")
+    assert(not os.execute("test -d " .. spurious_dir), "spurious directory should be removed by prune")
+
+    -- All legitimate files must remain intact
+    assert(os.execute("test -f " .. repo_out .. "/index.html"), "index.html must be kept")
+    assert(os.execute("test -f " .. repo_out .. "/style.css"), "style.css must be kept")
+    assert(os.execute("test -f " .. repo_out .. "/log.html"), "log.html must be kept")
+    assert(os.execute("test -f " .. repo_out .. "/src/main.lua.html"), "src/main.lua.html must be kept")
+
+    cleanup()
+end)
+
 cleanup()
 runner.summary()
