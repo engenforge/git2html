@@ -173,19 +173,22 @@ runner.test("-p and --prune prune extraneous files", function()
     cleanup()
 end)
 
-runner.test("repeat build on clean repo skips re-walking and preserves output", function()
+runner.test("repeat build preserves output and leaves no dotfiles or marker files", function()
     setup_repo()
     run_g2h()
 
-    local marker = out .. "/git2html-incr-repo/.git2html_head"
-    assert(os.execute("test -f " .. marker), "head marker file should exist after first run")
+    local repo_out = out .. "/git2html-incr-repo"
+    -- Verify no hidden files exist anywhere in the generated output
+    local p = io.popen("find " .. repo_out .. " -name '.*' ! -path " .. repo_out)
+    local dotfiles = p:read("*all")
+    p:close()
+    assert(dotfiles == "", "no hidden dotfiles or marker files should exist in output:\n" .. dotfiles)
 
-    -- Second run without flags (default mode)
-    local text = run_g2h()
-    assert(not text:find("Walking tree", 1, true), "clean repeat build should not re-walk the tree:\n" .. text)
+    -- Second run with -v: should skip unchanged files
+    local text = run_g2h("-v")
+    assert(text:find("Skipping: src/main.lua", 1, true), "repeat build should skip unchanged files:\n" .. text)
 
     -- All outputs must remain intact
-    local repo_out = out .. "/git2html-incr-repo"
     assert(os.execute("test -f " .. repo_out .. "/index.html"), "repo index.html must remain intact")
     assert(os.execute("test -f " .. repo_out .. "/src/main.lua.html"), "src/main.lua.html must remain intact")
 
