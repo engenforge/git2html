@@ -29,7 +29,7 @@ Release tarballs and `SHA256SUMS` are published at:
 - Convert README.md to formatted HTML.
 - Syntax highlighting for source code.
 - Forge-like appearance (Codeberg/Forgejo style).
-- Output conforms to the [WebVeld specification](https://webveld.org).
+- Output conforms to the [WebVeld specification](https://git.engenforge.com/webveld/doc/webveld-spec.md.html).
 - Reproducible: rebuilding unchanged input produces byte-identical output.
 - Binary files are published verbatim; WebVeld-compatible files like PNG and JPEG are displayed directly, while other binary files receive a download landing page.
 
