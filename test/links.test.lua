@@ -5,9 +5,10 @@ runner.test("link validation: all generated links must point to existing files",
     local repo_dir = base_dir .. "/repo1"
     os.execute("rm -rf " .. base_dir .. " && mkdir -p " .. repo_dir)
     os.execute("git -C " .. repo_dir .. " init >/dev/null 2>&1")
-    os.execute("echo '# README' > " .. repo_dir .. "/README.md")
+    os.execute("echo '# README\n\nSee [manual](docs/manual.md), [page](docs/page.html), and [docs](docs).' > " .. repo_dir .. "/README.md")
     os.execute("mkdir -p " .. repo_dir .. "/docs")
-    os.execute("echo 'doc' > " .. repo_dir .. "/docs/manual.md")
+    os.execute("echo 'doc [up](..) [page](page.html)' > " .. repo_dir .. "/docs/manual.md")
+    os.execute("echo '<html></html>' > " .. repo_dir .. "/docs/page.html")
     os.execute("git -C " .. repo_dir .. " add . && git -C " .. repo_dir .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -m 'init' >/dev/null 2>&1")
     
     local output_dir = "/tmp/git2html-link-output"

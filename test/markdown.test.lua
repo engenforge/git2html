@@ -33,11 +33,16 @@ runner.test("markdown links are rewritten to the generated pages", function()
     os.execute("mkdir -p " .. repo .. "/doc")
 
     local f = io.open(repo .. "/README.md", "w")
-    f:write("# Top\n\nSee [the guide](doc/guide.md) and [src](src/).\n")
+    f:write("# Top\n\nSee [the guide](doc/guide.md), [src](src/), [src bare](src), "
+        .. "[html](doc/page.html), and [html sec](doc/page.html#sec).\n")
     f:close()
     f = io.open(repo .. "/doc/guide.md", "w")
-    f:write("# Guide\n\nBack to [the readme](../README.md).\n"
+    f:write("# Guide\n\nBack to [the readme](../README.md), [page](page.html), "
+        .. "[up](..), [here](.), and [up sec](..#files).\n"
         .. "External [site](https://example.com/x) and [anchor](#top).\n")
+    f:close()
+    f = io.open(repo .. "/doc/page.html", "w")
+    f:write("<!DOCTYPE html><html><body><h1>Page</h1></body></html>\n")
     f:close()
     f = io.open(repo .. "/doc/uppercase.MD", "w")
     f:write("# Uppercase\n\nThis is uppercase markdown.\n")
@@ -68,6 +73,14 @@ runner.test("markdown links are rewritten to the generated pages", function()
 
     assert(html:match('href="%.%./README%.md%.html"'),
         "relative markdown link was not rewritten")
+    assert(html:match('href="page%.html%.html"'),
+        "relative .html link was not rewritten to .html.html")
+    assert(html:match('href="%.%./index%.html"'),
+        "parent directory link .. was not rewritten to ../index.html")
+    assert(html:match('href="%./index%.html"'),
+        "current directory link . was not rewritten to ./index.html")
+    assert(html:match('href="%.%./index%.html#files"'),
+        "parent directory link with fragment was not rewritten")
     assert(html:match('href="https://example%.com/x"'),
         "external link was rewritten")
     assert(html:match('href="#top"'), "fragment link was rewritten")
@@ -77,6 +90,10 @@ runner.test("markdown links are rewritten to the generated pages", function()
     g:close()
     assert(top:match('href="doc/guide%.md%.html"'), "nested link was not rewritten")
     assert(top:match('href="src/index%.html"'), "directory link was not rewritten")
+    assert(top:match('href="doc/page%.html%.html"'), "nested .html link was not rewritten")
+    assert(top:match('href="doc/page%.html%.html#sec"'), "nested .html link with fragment was not rewritten")
+    assert(top:match('href="src/index%.html".*href="src/index%.html"'),
+        "bare directory link without trailing slash was not rewritten to src/index.html")
 
     assert(top:match('<div class="readme">'), "rendered markdown container missing in README.md.html")
     assert(not top:match('<pre tabindex="0"><code>'), "raw code block rendered for README.md.html")

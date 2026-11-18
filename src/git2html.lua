@@ -290,26 +290,34 @@ local function md(content)
 end
 
 
+local function sh_quote(s)
+    return "'" .. s:gsub("'", "'\\''") .. "'"
+end
+
 -- Rewrites relative links inside rendered markdown to the pages this tool
 -- actually generates. Every file in a repository is published as <path>.html
--- and every directory as <path>/index.html, so a source link such as
--- ../README.md resolves to nothing once rendered.
+-- (including .html files, which become <path>.html.html) and every directory
+-- as <path>/index.html, so a source link such as ../README.md or page.html
+-- resolves to nothing once rendered.
 --
 -- Anything carrying a scheme, a fragment-only target, or a root-absolute path
 -- is left alone: the first two are not repository paths, and rewriting the
 -- third would be wrong in a tree that has to stay relocatable.
-local function rewrite_md_links(html)
+local function rewrite_md_links(html, source_dir)
     return (html:gsub('href="([^"]*)"', function(href)
         if href == "" or href:match("^%a[%w+.-]*:") or href:sub(1, 1) == "#"
             or href:sub(1, 1) == "/" then
             return 'href="' .. href .. '"'
         end
         local target, suffix = href:match("^([^#?]*)(.*)$")
-        if target == "" or target:match("%.html$") then
+        if target == "" then
             return 'href="' .. href .. '"'
         end
         if target:match("/$") then
             target = target .. "index.html"
+        elseif target == "." or target == ".." or target:match("/%.%.?$")
+            or (source_dir and exec_ok("test -d " .. sh_quote(source_dir .. "/" .. target))) then
+            target = target .. "/index.html"
         else
             target = target .. ".html"
         end
@@ -334,10 +342,6 @@ local function is_binary(path)
     local chunk = f:read(8000) or ""
     f:close()
     return chunk:find("\0", 1, true) ~= nil
-end
-
-local function sh_quote(s)
-    return "'" .. s:gsub("'", "'\\''") .. "'"
 end
 
 local function normalize_path(p)
@@ -768,7 +772,8 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
                             file_breadcrumbs, attr_escape(name), attr_escape(name))
                     elseif is_markdown_file(name) then
                         local content = read_file(source) or ""
-                        local html_content = "<div class=\"readme\">" .. rewrite_md_links(md(content)) .. "</div>"
+                        local source_dir = repo_path .. (subdir == "" and "" or "/" .. subdir)
+                        local html_content = "<div class=\"readme\">" .. rewrite_md_links(md(content), source_dir) .. "</div>"
                         body = "<h2>" .. file_breadcrumbs .. "</h2>" .. CI .. html_content
                     elseif ext_lower == "txt" or ext_lower == "text" then
                         local content = read_file(source) or ""
@@ -802,7 +807,8 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
                         local is_markdown = is_markdown_file(name)
                         local html_content
                         if is_markdown then
-                            html_content = "<div class=\"readme\">" .. rewrite_md_links(md(content)) .. "</div>"
+                            local source_dir = repo_path .. (subdir == "" and "" or "/" .. subdir)
+                            html_content = "<div class=\"readme\">" .. rewrite_md_links(md(content), source_dir) .. "</div>"
                         else
                             local extension = name:match("%.([^%.]+)$")
                             local lang = extension and extension:lower()
@@ -845,7 +851,7 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
             or read_file(repo_path .. "/readme.md")
             or read_file(repo_path .. "/README.MD")
         if readme then
-            index_content = index_content .. CI .. "<div class=\"readme\">" .. rewrite_md_links(md(readme)) .. "</div>"
+            index_content = index_content .. CI .. "<div class=\"readme\">" .. rewrite_md_links(md(readme), repo_path) .. "</div>"
         end
     end
 
