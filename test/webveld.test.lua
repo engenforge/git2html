@@ -106,10 +106,21 @@ local function build_fixture()
     -- A README exercises the markdown writer, a Lua file the highlighter, and
     -- a nested directory the breadcrumb and parent-index paths.
     local readme = io.open(temp_repo .. "/README.md", "w")
-    readme:write("# Fixture\n\nA paragraph with a [link](https://example.com).\n\n"
+    readme:write("# Fixture\n\nA paragraph with a [link](https://example.com), "
+        .. "angle-bracket placeholders <text>, Vec<T>, <point>, "
+        .. "a raw <script>alert(1)</script> tag, and a line<br>break.\n\n"
+        .. "<!-- a markdown comment -->\n\n"
+        .. "### Skipped Heading\n\n"
+        .. "#### Deeper Heading\n\n"
+        .. "### Sibling Heading\n\n"
         .. "```lua\nlocal x = 1 -- comment\n```\n\n"
         .. "| a | b |\n| - | - |\n| 1 | 2 |\n")
     readme:close()
+
+    os.execute("mkdir -p " .. temp_repo .. "/doc")
+    local doc_md = io.open(temp_repo .. "/doc/notes.md", "w")
+    doc_md:write("#### Deep Start\n\nSome <text> and Option<T> in prose.\n")
+    doc_md:close()
 
     os.execute("mkdir -p " .. temp_repo .. "/src")
     local src = io.open(temp_repo .. "/src/main.lua", "w")

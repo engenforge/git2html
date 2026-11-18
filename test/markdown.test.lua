@@ -143,4 +143,43 @@ runner.test("clicking a markdown file renders markdown rather than raw text or d
 
     os.execute("rm -rf " .. repo .. " " .. out)
 end)
+
+runner.test("markdown escapes non-comment raw HTML and normalizes skipped heading levels", function()
+    local repo = "/tmp/git2html-mdsanitize-repo"
+    local out = "/tmp/git2html-mdsanitize-out"
+    os.execute("rm -rf " .. repo .. " " .. out)
+    os.execute("mkdir -p " .. repo)
+
+    local f = io.open(repo .. "/README.md", "w")
+    f:write("# Title\n\n"
+        .. "Use <text>, Vec<T>, <point>, and <script>x</script>, plus<br>break.\n\n"
+        .. "<!-- hidden -->\n\n"
+        .. "### Sec A\n\n"
+        .. "#### Sub A1\n\n"
+        .. "### Sec B\n")
+    f:close()
+
+    os.execute("git -C " .. repo .. " init -q >/dev/null 2>&1")
+    os.execute("git -C " .. repo .. " add -A >/dev/null 2>&1")
+    os.execute("git -C " .. repo
+        .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -qm init >/dev/null 2>&1")
+    os.execute(runner.bin .. " " .. repo .. " " .. out .. " >/dev/null 2>&1")
+
+    local g = io.open(out .. "/git2html-mdsanitize-repo/README.md.html", "r")
+    local html = g:read("*all")
+    g:close()
+
+    assert(html:match("&lt;text&gt;"), "<text> was not escaped")
+    assert(html:match("Vec&lt;T&gt;"), "Vec<T> was not escaped")
+    assert(html:match("&lt;point&gt;"), "<point> was not escaped")
+    assert(html:match("&lt;script&gt;x&lt;/script&gt;"), "<script> was not escaped")
+    assert(html:match("<br>"), "<br> was not preserved")
+    assert(html:match("<!%-%- hidden %-%->"), "HTML comment was not preserved")
+    assert(html:match("<h1>Title</h1>"), "<h1>Title</h1> missing")
+    assert(html:match("<h2>Sec A</h2>"), "### Sec A was not normalized to <h2>")
+    assert(html:match("<h3>Sub A1</h3>"), "#### Sub A1 was not normalized to <h3>")
+    assert(html:match("<h2>Sec B</h2>"), "### Sec B was not normalized to <h2>")
+
+    os.execute("rm -rf " .. repo .. " " .. out)
+end)
 runner.summary()

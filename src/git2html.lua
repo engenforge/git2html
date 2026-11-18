@@ -196,6 +196,64 @@ function md_writer.fenced_code(code, info)
     return {'<pre tabindex="0"><code data-lang="', lang, '">', hl_to_html(code, lang), "</code></pre>"}
 end
 
+-- Lunamark's default inline_html/display_html pass raw HTML through verbatim,
+-- which lets angle-bracketed prose/generics (such as <text>, <T>, <point>) or
+-- arbitrary HTML tags violate WebVeld's allowed element/attribute rules.
+-- Preserve HTML comments (ignored by the validator) and bare <br>/<hr> void
+-- tags; escape everything else so it renders as literal text.
+local function sanitize_raw_html(s)
+    if s:match("^<!%-%-.*%-%->%s*$") then
+        return s
+    end
+    local void_tag = s:match("^<%s*([bBhH][rR])%s*/?%s*>%s*$")
+    if void_tag then
+        return "<" .. void_tag:lower() .. ">"
+    end
+    return html_escape(s)
+end
+
+function md_writer.inline_html(s)
+    return sanitize_raw_html(s)
+end
+
+function md_writer.display_html(s)
+    return sanitize_raw_html(s)
+end
+
+-- Clamps skipped heading levels (e.g. <h1> followed by <h3>) so the output
+-- satisfies WebVeld's heading-hierarchy rule while keeping sibling headings
+-- at the same emitted level. initial_prev accounts for any heading emitted
+-- by the surrounding page template (e.g. <h2> file breadcrumbs).
+local function normalize_headings(html, initial_prev)
+    local stack = {}
+    local current_emitted = nil
+    return (html:gsub("<(/?)[hH]([1-6])([%s>])", function(slash, lvl_str, tail)
+        if slash == "/" then
+            local emitted = current_emitted or lvl_str
+            current_emitted = nil
+            return "</h" .. emitted .. tail
+        end
+        local raw = tonumber(lvl_str)
+        while #stack > 0 and stack[#stack].raw >= raw do
+            stack[#stack] = nil
+        end
+        local emitted
+        if #stack == 0 then
+            if initial_prev and initial_prev > 0 then
+                emitted = math.min(raw, initial_prev + 1)
+            else
+                emitted = raw
+            end
+        else
+            emitted = math.min(raw, stack[#stack].emitted + 1)
+        end
+        if emitted > 6 then emitted = 6 end
+        stack[#stack + 1] = { raw = raw, emitted = emitted }
+        current_emitted = emitted
+        return "<h" .. emitted .. tail
+    end))
+end
+
 local md_parse = lunamark.reader.markdown.new(md_writer, {
     fenced_code_blocks = true,
     pipe_tables = true,
@@ -218,12 +276,13 @@ local md_parse = lunamark.reader.markdown.new(md_writer, {
     escaped_line_breaks = true,
 })
 
-local function md_render(content)
+local function md_render(content, initial_prev)
     -- Without a trailing blank line, lunamark's last block loses its <p>
     -- wrapper -- every README.md read from disk ends in a single newline
     -- at most, so this would otherwise strip the tag from every README's
     -- final paragraph.
-    return (md_parse(content:gsub("%s*$", "") .. "\n\n"))
+    local html = md_parse(content:gsub("%s*$", "") .. "\n\n")
+    return normalize_headings(html, initial_prev)
 end
 
 -- Splits a leading YAML frontmatter block off a markdown document, the way
@@ -280,13 +339,13 @@ local function frontmatter_html(lines)
         .. "\n</tbody>\n</table>\n"
 end
 
-local function md(content)
+local function md(content, initial_prev)
     local fm_lines, body = split_frontmatter(content)
     if fm_lines then
         local html = frontmatter_html(fm_lines)
-        return html .. (body:match("%S") and md_render(body) or "")
+        return html .. (body:match("%S") and md_render(body, initial_prev) or "")
     end
-    return md_render(content)
+    return md_render(content, initial_prev)
 end
 
 
@@ -773,7 +832,7 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
                     elseif is_markdown_file(name) then
                         local content = read_file(source) or ""
                         local source_dir = repo_path .. (subdir == "" and "" or "/" .. subdir)
-                        local html_content = "<div class=\"readme\">" .. rewrite_md_links(md(content), source_dir) .. "</div>"
+                        local html_content = "<div class=\"readme\">" .. rewrite_md_links(md(content, 2), source_dir) .. "</div>"
                         body = "<h2>" .. file_breadcrumbs .. "</h2>" .. CI .. html_content
                     elseif ext_lower == "txt" or ext_lower == "text" then
                         local content = read_file(source) or ""
@@ -808,7 +867,7 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
                         local html_content
                         if is_markdown then
                             local source_dir = repo_path .. (subdir == "" and "" or "/" .. subdir)
-                            html_content = "<div class=\"readme\">" .. rewrite_md_links(md(content), source_dir) .. "</div>"
+                            html_content = "<div class=\"readme\">" .. rewrite_md_links(md(content, 2), source_dir) .. "</div>"
                         else
                             local extension = name:match("%.([^%.]+)$")
                             local lang = extension and extension:lower()
