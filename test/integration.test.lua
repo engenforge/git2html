@@ -170,9 +170,9 @@ runner.test("release url test: -r shows a release line only at the repo root", f
     local root = assert(io.open(output_dir .. "/git2html-release-repo/index.html", "r"))
     local root_html = root:read("*all")
     root:close()
-    assert(root_html:match('<p class="release%-url">Releases available at '
-        .. '<a href="https://git%.example%.com/git2html%-release%-repo/archive/">'
-        .. 'https://git%.example%.com/git2html%-release%-repo/archive/</a></p>'),
+    assert(root_html:match('<p class="release%-url">Releases at '
+        .. '<a href="https://git%.example%.com/git2html%-release%-repo/">'
+        .. 'https://git%.example%.com/git2html%-release%-repo/</a></p>'),
         "release line missing or wrong URL on the repo root Files page")
 
     local sub = assert(io.open(output_dir .. "/git2html-release-repo/sub/index.html", "r"))

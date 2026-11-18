@@ -47,11 +47,11 @@ The generated site includes:
 	output will be served from.
 
 *-r* <release-url-base>
-	Show a "Releases available at ..." line directly below the clone line
-	on each repository's Files page. git2html appends */<repo-name>/archive/*
+	Show a "Releases at ..." line directly below the clone line
+	on each repository's Files page. git2html appends */<repo-name>/*
 	to <release-url-base> to build the release folder URL, e.g.
 	*-r https://git.example.com* produces
-	*https://git.example.com/myrepo/archive/* for a repository named *myrepo*.
+	*https://git.example.com/myrepo/* for a repository named *myrepo*.
 	Omitted by default.
 
 

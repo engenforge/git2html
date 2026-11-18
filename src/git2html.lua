@@ -574,13 +574,13 @@ local function clone_line(header_parts)
     return string.format('<p class="clone-url">Git clone via <code>%s</code></p>' .. CI, html_escape(url))
 end
 
--- Empty unless -r was given: shows a "Releases available at ..." line
+-- Empty unless -r was given: shows a "Releases at ..." line
 -- directly below the clone line on each repository's Files page.
 local function release_line(header_parts)
     if not release_url_base then return "" end
     local base = release_url_base:gsub("/+$", "")
-    local url = base .. "/" .. table.concat(header_parts, "/") .. "/archive/"
-    return string.format('<p class="release-url">Releases available at <a href="%s">%s</a></p>' .. CI,
+    local url = base .. "/" .. table.concat(header_parts, "/") .. "/"
+    return string.format('<p class="release-url">Releases at <a href="%s">%s</a></p>' .. CI,
         html_escape(url), html_escape(url))
 end
 
