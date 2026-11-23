@@ -133,6 +133,68 @@ local function attr_escape(s)
     return html_escape(s):gsub('"', "&quot;")
 end
 
+local raw_mt = {}
+local function raw(html)
+    return setmetatable({ html = html or "" }, raw_mt)
+end
+
+local VOID_ELEMENTS = {
+    area = true, base = true, br = true, col = true, embed = true,
+    hr = true, img = true, input = true, link = true, meta = true,
+    param = true, source = true, track = true, wbr = true,
+}
+
+local function append_child(parts, child)
+    if child == nil or child == false then
+        return
+    elseif type(child) == "table" then
+        if getmetatable(child) == raw_mt then
+            parts[#parts + 1] = child.html
+        else
+            for _, sub in ipairs(child) do
+                append_child(parts, sub)
+            end
+        end
+    else
+        parts[#parts + 1] = html_escape(tostring(child))
+    end
+end
+
+local function append_attr(parts, k, v)
+    if v == true then
+        parts[#parts + 1] = " " .. k
+    elseif v ~= nil and v ~= false then
+        parts[#parts + 1] = " " .. k .. '="' .. attr_escape(tostring(v)) .. '"'
+    end
+end
+
+local function el(tag, attrs, children)
+    local parts = { "<", tag }
+    if attrs then
+        if attrs[1] ~= nil then
+            for _, pair in ipairs(attrs) do
+                append_attr(parts, pair[1], pair[2])
+            end
+        else
+            local keys = {}
+            for k in pairs(attrs) do
+                keys[#keys + 1] = k
+            end
+            table.sort(keys)
+            for _, k in ipairs(keys) do
+                append_attr(parts, k, attrs[k])
+            end
+        end
+    end
+    parts[#parts + 1] = ">"
+    if VOID_ELEMENTS[tag] then
+        return table.concat(parts)
+    end
+    append_child(parts, children)
+    parts[#parts + 1] = "</" .. tag .. ">"
+    return table.concat(parts)
+end
+
 local function truncate_desc(desc, max_chars)
     if not desc then return "" end
     max_chars = max_chars or 50
@@ -159,14 +221,14 @@ end
 
 local function format_description(desc)
     if not desc or desc == "" or desc == "-" then
-        return '<td class="col-desc">-</td>'
+        return el("td", { class = "col-desc" }, "-")
     end
     desc = desc:gsub("[\r\n]+", " "):gsub("^%s+", ""):gsub("%s+$", "")
     local truncated = truncate_desc(desc, 50)
     if truncated ~= desc then
-        return string.format('<td class="col-desc" title="%s">%s</td>', attr_escape(desc), html_escape(truncated))
+        return el("td", { class = "col-desc", title = desc }, truncated)
     else
-        return string.format('<td class="col-desc">%s</td>', html_escape(desc))
+        return el("td", { class = "col-desc" }, desc)
     end
 end
 
@@ -324,7 +386,7 @@ local function frontmatter_html(lines)
         else
             local k, v = line:match("^([%w_][%w_ .%-]*):%s*(.-)%s*$")
             if not k or v:match("^[|>][%+%-]?$") or v == "" then
-                return "<pre tabindex=\"0\"><code>" .. html_escape(table.concat(lines, "\n")) .. "</code></pre>"
+                return el("pre", { tabindex = "0" }, raw(el("code", nil, table.concat(lines, "\n"))))
             end
             keys[#keys + 1] = k
             vals[#vals + 1] = unquote_yaml(v)
@@ -333,11 +395,13 @@ local function frontmatter_html(lines)
     if #keys == 0 then return "" end
     local rows = {}
     for i = 1, #keys do
-        rows[i] = "<tr><th scope=\"row\">" .. html_escape(keys[i]) .. "</th><td>"
-            .. html_escape(vals[i]) .. "</td></tr>"
+        rows[i] = el("tr", nil, {
+            raw(el("th", { scope = "row" }, keys[i])),
+            raw(el("td", nil, vals[i])),
+        })
     end
-    return "<table class=\"frontmatter\">\n<tbody>\n" .. table.concat(rows, "\n")
-        .. "\n</tbody>\n</table>\n"
+    return el("table", { class = "frontmatter" },
+        raw("\n" .. el("tbody", nil, raw("\n" .. table.concat(rows, "\n") .. "\n")) .. "\n")) .. "\n"
 end
 
 local function md(content, initial_prev)
@@ -554,16 +618,14 @@ local RI = "\n            "
 -- last segment (the current page) links to itself. Used for a repo's path
 -- within itself (subdirectories) and for a discovery walk's nested groups.
 local function breadcrumb_trail(parts)
-    local html = ""
+    local segs = {}
     for i, part in ipairs(parts) do
-        if i > 1 then html = html .. " / " end
         local up_levels = #parts - i
-        local part_rel = ""
-        for _ = 1, up_levels do part_rel = part_rel .. "../" end
+        local part_rel = string.rep("../", up_levels)
         local link_target = (up_levels == 0 and "index.html" or part_rel .. "index.html")
-        html = html .. string.format('<a href="%s">%s</a>', link_target, html_escape(part))
+        segs[i] = el("a", { href = link_target }, part)
     end
-    return html
+    return table.concat(segs, " / ")
 end
 
 -- Empty unless -c was given: git2html has no other way to know the URL its
@@ -572,7 +634,10 @@ local function clone_line(header_parts)
     if not clone_url_base then return "" end
     local base = clone_url_base:gsub("/+$", "")
     local url = base .. "/" .. table.concat(header_parts, "/") .. ".git"
-    return string.format('<p class="clone-url">Git clone via <code>%s</code></p>' .. CI, html_escape(url))
+    return el("p", { class = "clone-url" }, {
+        "Git clone via ",
+        raw(el("code", nil, url)),
+    }) .. CI
 end
 
 -- Empty unless -r was given: shows a "Releases at ..." line
@@ -581,10 +646,19 @@ local function release_line(header_parts)
     if not release_url_base then return "" end
     local base = release_url_base:gsub("/+$", "")
     local url = base .. "/" .. table.concat(header_parts, "/") .. "/"
-    return string.format('<p class="release-url">Releases at <a href="%s">%s</a></p>' .. CI,
-        attr_escape(url), html_escape(url))
+    return el("p", { class = "release-url" }, {
+        "Releases at ",
+        raw(el("a", { href = url }, url)),
+    }) .. CI
 end
 
+local function listing_row(href, label, desc_td, changed)
+    return el("tr", nil, {
+        raw(el("td", nil, raw(el("a", { href = href }, label)))),
+        raw(desc_td or format_description(nil)),
+        raw(el("td", { class = "col-changed" }, changed or "-")),
+    })
+end
 
 -- Column proportions used to live in an inline <style> block relying on
 -- table-layout and text-overflow, neither of which WebVeld permits (6.2).
@@ -593,28 +667,44 @@ end
 -- constraints, so long names wrap instead of being clipped to an ellipsis --
 -- which keeps the content readable rather than truncating it.
 local function files_table(rows, scrollable)
-    local table_html = '<table class="listing">' .. CI
-        .. '<colgroup><col class="col-name"><col class="col-desc"><col class="col-changed"></colgroup>' .. CI
-        .. '<thead><tr><th>Name</th><th>Description</th><th>Last Changed</th></tr></thead>' .. CI
-        .. '<tbody>' .. rows .. CI
-        .. '</tbody>' .. CI
-        .. '</table>'
+    local table_html = el("table", { class = "listing" }, raw(
+        CI .. el("colgroup", nil, {
+            raw(el("col", { class = "col-name" })),
+            raw(el("col", { class = "col-desc" })),
+            raw(el("col", { class = "col-changed" })),
+        })
+        .. CI .. el("thead", nil, raw(el("tr", nil, {
+            raw(el("th", nil, "Name")),
+            raw(el("th", nil, "Description")),
+            raw(el("th", nil, "Last Changed")),
+        })))
+        .. CI .. el("tbody", nil, raw(rows .. CI))
+        .. CI
+    ))
     if scrollable then
-        return '<div class="listing-pane" tabindex="0">' .. CI
-            .. table_html .. CI
-            .. '</div>'
+        return el("div", { class = "listing-pane", tabindex = "0" }, raw(CI .. table_html .. CI))
     else
         return table_html
     end
 end
 
 local function log_table(rows)
-    return '<table class="listing">' .. CI
-        .. '<colgroup><col class="col-hash"><col class="col-date"><col class="col-subject"><col class="col-author"></colgroup>' .. CI
-        .. '<thead><tr><th>Hash</th><th>Date</th><th>Subject</th><th>Author</th></tr></thead>' .. CI
-        .. '<tbody>' .. rows .. CI
-        .. '</tbody>' .. CI
-        .. '</table>'
+    return el("table", { class = "listing" }, raw(
+        CI .. el("colgroup", nil, {
+            raw(el("col", { class = "col-hash" })),
+            raw(el("col", { class = "col-date" })),
+            raw(el("col", { class = "col-subject" })),
+            raw(el("col", { class = "col-author" })),
+        })
+        .. CI .. el("thead", nil, raw(el("tr", nil, {
+            raw(el("th", nil, "Hash")),
+            raw(el("th", nil, "Date")),
+            raw(el("th", nil, "Subject")),
+            raw(el("th", nil, "Author")),
+        })))
+        .. CI .. el("tbody", nil, raw(rows .. CI))
+        .. CI
+    ))
 end
 
 local function get_footer()
@@ -628,7 +718,11 @@ local function get_footer()
     end
     -- Spacing belongs to .colophon in the style sheet; WebVeld section 6.1
     -- forbids the inline style attribute this used to carry.
-    return string.format("<footer class=\"colophon\">Generated by <a href=\"https://git.engenforge.com/git2html\">git2html</a> on %s</footer>", generation_date or "")
+    return el("footer", { class = "colophon" }, {
+        "Generated by ",
+        raw(el("a", { href = "https://git.engenforge.com/git2html" }, "git2html")),
+        " on " .. (generation_date or ""),
+    })
 end
 
 -- Empty by default: unlike the footer, there's no sensible built-in content
@@ -643,6 +737,26 @@ local function get_header()
     return ""
 end
 
+local function page_shell(page_title, rel_path, nav_html, content)
+    rel_path = rel_path or ""
+    local head = el("head", nil, raw("\n    "
+        .. el("meta", { charset = "UTF-8" }) .. "\n    "
+        .. el("title", nil, page_title) .. "\n    "
+        .. el("meta", { { "name", "viewport" }, { "content", "width=device-width, initial-scale=1" } }) .. "\n    "
+        .. el("meta", { { "name", "color-scheme" }, { "content", "light dark" } }) .. "\n    "
+        .. el("meta", { { "name", "generator" }, { "content", "git2html" } }) .. "\n    "
+        .. el("link", { { "rel", "stylesheet" }, { "href", rel_path .. "style.css" } }) .. "\n"))
+    local body = el("body", nil, raw("\n" .. el("div", { class = "site-container" }, raw("\n    "
+        .. el("a", { class = "skip", href = "#content" }, "Skip to content") .. "\n    "
+        .. get_header() .. "\n    "
+        .. el("header", { class = "masthead" }, raw("\n        "
+            .. el("nav", { ["aria-label"] = "Primary" }, raw("\n            "
+                .. el("p", { class = "nav" }, raw("\n            " .. nav_html .. "\n            ")) .. "\n        ")) .. "\n    ")) .. "\n    "
+        .. el("main", { class = "page", id = "content", tabindex = "-1" }, raw("\n        " .. content .. "\n    ")) .. "\n    "
+        .. get_footer() .. "\n")) .. "\n"))
+    return "<!DOCTYPE html>\n" .. el("html", { lang = site_lang }, raw("\n" .. head .. "\n" .. body .. "\n")) .. "\n"
+end
+
 -- Same nav-only masthead as repo_template: no separate <h1> repeating what
 -- the nav already says. The nav here has just the one "Repositories" link
 -- since there's no repo or log page in scope -- a nested discovery group's
@@ -650,37 +764,8 @@ end
 -- subdirectory's (see breadcrumb_trail).
 local function template(page_title, content, rel_path)
     rel_path = rel_path or ""
-
-    return string.format([[
-<!DOCTYPE html>
-<html lang="%s">
-<head>
-    <meta charset="UTF-8">
-    <title>%s</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="light dark">
-    <meta name="generator" content="git2html">
-    <link rel="stylesheet" href="%sstyle.css">
-</head>
-<body>
-<div class="site-container">
-    <a class="skip" href="#content">Skip to content</a>
-    %s
-    <header class="masthead">
-        <nav aria-label="Primary">
-            <p class="nav">
-            <a href="%sindex.html">Repositories</a>
-            </p>
-        </nav>
-    </header>
-    <main class="page" id="content" tabindex="-1">
-        %s
-    </main>
-    %s
-</div>
-</body>
-</html>
-]], attr_escape(site_lang), html_escape(page_title), rel_path, get_header(), rel_path, content, get_footer())
+    local nav_html = el("a", { href = rel_path .. "index.html" }, "Repositories")
+    return page_shell(page_title, rel_path, nav_html, content)
 end
 
 local function generate_parent_indexes(output_root, header_parts, theme)
@@ -697,16 +782,16 @@ local function generate_parent_indexes(output_root, header_parts, theme)
             for _ = 1, i do rel_to_root = rel_to_root .. "../" end
             
             local next_part = header_parts[i+1]
-            local rows = RI .. string.format('<tr><td><a href="%s/index.html">%s/</a></td><td class="col-desc">-</td><td class="col-changed">-</td></tr>', attr_escape(next_part), html_escape(next_part))
+            local rows = RI .. listing_row(next_part .. "/index.html", next_part .. "/")
             if i > 0 then
-                rows = RI .. '<tr><td><a href="../index.html">..</a></td><td class="col-desc">-</td><td class="col-changed">-</td></tr>' .. rows
+                rows = RI .. listing_row("../index.html", "..") .. rows
             end
 
             -- At the root, the nav's "Repositories" link already says this is
             -- the repositories index -- a breadcrumb here would just repeat
             -- that. A nested group's path is real extra information the nav
             -- doesn't carry, so it gets one.
-            local index_content = i == 0 and "" or ("<h2>" .. breadcrumb_trail(parts) .. "</h2>" .. CI)
+            local index_content = i == 0 and "" or (el("h2", nil, raw(breadcrumb_trail(parts))) .. CI)
             index_content = index_content .. files_table(rows, false)
             local page_title = (i == 0 and "Repositories" or table.concat(parts, " / "))
             write_file(target_output .. "/index.html", template(page_title, index_content, rel_to_root))
@@ -729,39 +814,14 @@ local function repo_template(header_parts, page_title, content, rel_path)
 
     local nav_prefix = ""
     if has_multiple_repos then
-        nav_prefix = string.format('<a href="%sindex.html">Repositories</a> &middot; ', site_rel)
+        nav_prefix = el("a", { href = site_rel .. "index.html" }, "Repositories") .. " &middot; "
     end
+    local nav_html = nav_prefix
+        .. el("a", { href = rel_path .. "index.html" }, repo_name)
+        .. " &middot; "
+        .. el("a", { href = rel_path .. "log.html" }, "Log")
 
-    return string.format([[
-<!DOCTYPE html>
-<html lang="%s">
-<head>
-    <meta charset="UTF-8">
-    <title>%s</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="light dark">
-    <meta name="generator" content="git2html">
-    <link rel="stylesheet" href="%sstyle.css">
-</head>
-<body>
-<div class="site-container">
-    <a class="skip" href="#content">Skip to content</a>
-    %s
-    <header class="masthead">
-        <nav aria-label="Primary">
-            <p class="nav">
-            %s<a href="%sindex.html">%s</a> &middot; <a href="%slog.html">Log</a>
-            </p>
-        </nav>
-    </header>
-    <main class="page" id="content" tabindex="-1">
-        %s
-    </main>
-    %s
-</div>
-</body>
-</html>
-]], attr_escape(site_lang), html_escape(page_title), rel_path, get_header(), nav_prefix, rel_path, html_escape(repo_name), rel_path, content, get_footer())
+    return page_shell(page_title, rel_path, nav_html, content)
 end
 
 local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, metadata)
@@ -786,20 +846,20 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
 
     local rows = ""
     if subdir ~= "" then
-        rows = rows .. RI .. '<tr><td><a href="../index.html">..</a></td><td class="col-desc">-</td><td class="col-changed">-</td></tr>'
+        rows = rows .. RI .. listing_row("../index.html", "..")
     end
 
     for _, f in ipairs(files) do
         local name = f.path:match("([^/]+)$") or f.path
         local desc_td = format_description(f.description)
         if f.is_dir then
-            rows = rows .. RI .. string.format('<tr><td><a href="%s/index.html">%s/</a></td>%s<td class="col-changed">%s</td></tr>', attr_escape(name), html_escape(name), desc_td, html_escape(f.last_changed))
+            rows = rows .. RI .. listing_row(name .. "/index.html", name .. "/", desc_td, f.last_changed)
             register_expected_dir(output_dir .. "/" .. f.path)
             os.execute("mkdir -p " .. sh_quote(output_dir .. "/" .. f.path))
             generate_repo_tree(repo_path, output_dir, header_parts, f.path, metadata)
         else
             local file_view_path = name .. ".html"
-            rows = rows .. RI .. string.format('<tr><td><a href="%s">%s</a></td>%s<td class="col-changed">%s</td></tr>', attr_escape(file_view_path), html_escape(name), desc_td, html_escape(f.last_changed))
+            rows = rows .. RI .. listing_row(file_view_path, name, desc_td, f.last_changed)
             
             local source = repo_path .. "/" .. f.path
 
@@ -823,31 +883,29 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
                 else
                     local ext = name:match("%.([^%.]+)$")
                     local ext_lower = ext and ext:lower()
-                    local file_breadcrumbs = breadcrumbs .. " / " .. html_escape(name)
+                    local file_breadcrumbs = raw(breadcrumbs .. " / " .. html_escape(name))
                     local body
 
                     if ext_lower == "png" or ext_lower == "jpg" or ext_lower == "jpeg" then
-                        body = string.format(
-                            '<h2>%s</h2>' .. CI .. '<p><img src="%s" alt="%s"></p>',
-                            file_breadcrumbs, attr_escape(name), attr_escape(name))
+                        body = el("h2", nil, file_breadcrumbs) .. CI
+                            .. el("p", nil, raw(el("img", { { "src", name }, { "alt", name } })))
                     elseif is_markdown_file(name) then
                         local content = read_file(source) or ""
                         local source_dir = repo_path .. (subdir == "" and "" or "/" .. subdir)
-                        local html_content = "<div class=\"readme\">" .. rewrite_md_links(md(content, 2), source_dir) .. "</div>"
-                        body = "<h2>" .. file_breadcrumbs .. "</h2>" .. CI .. html_content
+                        local html_content = el("div", { class = "readme" }, raw(rewrite_md_links(md(content, 2), source_dir)))
+                        body = el("h2", nil, file_breadcrumbs) .. CI .. html_content
                     elseif ext_lower == "txt" or ext_lower == "text" then
                         local content = read_file(source) or ""
-                        local html_content = '<pre tabindex="0"><code>' .. hl_to_html(content, "text") .. "</code></pre>"
-                        body = "<h2>" .. file_breadcrumbs .. "</h2>" .. CI .. html_content
+                        local html_content = el("pre", { tabindex = "0" }, raw(el("code", nil, raw(hl_to_html(content, "text")))))
+                        body = el("h2", nil, file_breadcrumbs) .. CI .. html_content
                     else
                         local size = 0
                         local probe = io.open(source, "rb")
                         if probe then size = probe:seek("end") probe:close() end
 
-                        body = string.format(
-                            '<h2>%s</h2>' .. CI .. '<p class="meta">Binary file, %s.</p>' .. CI
-                            .. '<p><a href="%s">Download %s</a></p>',
-                            file_breadcrumbs, human_size(size), attr_escape(name), html_escape(name))
+                        body = el("h2", nil, file_breadcrumbs) .. CI
+                            .. el("p", { class = "meta" }, "Binary file, " .. human_size(size) .. ".") .. CI
+                            .. el("p", nil, raw(el("a", { href = name }, "Download " .. name)))
                     end
 
                     write_file(html_target,
@@ -868,7 +926,7 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
                         local html_content
                         if is_markdown then
                             local source_dir = repo_path .. (subdir == "" and "" or "/" .. subdir)
-                            html_content = "<div class=\"readme\">" .. rewrite_md_links(md(content, 2), source_dir) .. "</div>"
+                            html_content = el("div", { class = "readme" }, raw(rewrite_md_links(md(content, 2), source_dir)))
                         else
                             local extension = name:match("%.([^%.]+)$")
                             local lang = extension and extension:lower()
@@ -882,11 +940,11 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
                             -- scrolled without a pointer. tabindex="0" puts it in the
                             -- tab order, which is what spec section 5.1 admits the
                             -- attribute for.
-                            html_content = '<pre tabindex="0"><code>' .. hl_to_html(content, lang) .. "</code></pre>"
+                            html_content = el("pre", { tabindex = "0" }, raw(el("code", nil, raw(hl_to_html(content, lang)))))
                         end
 
-                        local file_breadcrumbs = breadcrumbs .. " / " .. html_escape(name)
-                        write_file(html_target, repo_template(header_parts, display_name .. " - " .. f.path, "<h2>" .. file_breadcrumbs .. "</h2>" .. CI .. html_content, rel_to_root))
+                        local file_breadcrumbs = raw(breadcrumbs .. " / " .. html_escape(name))
+                        write_file(html_target, repo_template(header_parts, display_name .. " - " .. f.path, el("h2", nil, file_breadcrumbs) .. CI .. html_content, rel_to_root))
                     end
                 end
             end
@@ -897,8 +955,8 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
     -- with the repo's own name -- already shown in the nav bar, so
     -- repeating it here would be the same redundant-title problem the nav
     -- redesign fixed. A subdirectory's breadcrumbs carries real extra path
-    -- information the nav doesn't, so it stays.
-    local index_content = subdir == "" and "" or ("<h2>" .. breadcrumbs .. "</h2>" .. CI)
+    -- information the nav doesn't carry, so it stays.
+    local index_content = subdir == "" and "" or (el("h2", nil, raw(breadcrumbs)) .. CI)
     local is_main_landing = (subdir == "")
     if is_main_landing then
         index_content = index_content .. clone_line(header_parts)
@@ -911,7 +969,7 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
             or read_file(repo_path .. "/readme.md")
             or read_file(repo_path .. "/README.MD")
         if readme then
-            index_content = index_content .. CI .. "<div class=\"readme\">" .. rewrite_md_links(md(readme), repo_path) .. "</div>"
+            index_content = index_content .. CI .. el("div", { class = "readme" }, raw(rewrite_md_links(md(readme), repo_path)))
         end
     end
 
@@ -932,9 +990,12 @@ local function generate_repo_site(repo_path, target_output, header_parts, theme,
     local log_data = git.get_log(repo_path)
     local log_rows = ""
     for _, c in ipairs(log_data) do
-        log_rows = log_rows .. RI .. string.format(
-            "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>",
-            html_escape(c.hash), html_escape(c.date), html_escape(c.subject), html_escape(c.author))
+        log_rows = log_rows .. RI .. el("tr", nil, {
+            raw(el("td", nil, c.hash)),
+            raw(el("td", nil, c.date)),
+            raw(el("td", nil, c.subject)),
+            raw(el("td", nil, c.author)),
+        })
     end
     local log_html = log_table(log_rows)
     write_file(target_output .. "/log.html", repo_template(header_parts, header_parts[#header_parts] .. " - Log", log_html))
@@ -1017,7 +1078,7 @@ local function walk_and_process(current_path, output_root, strip_path, theme)
 
             local rows = ""
             if #header_parts > 0 then
-                rows = rows .. RI .. '<tr><td><a href="../index.html">..</a></td><td class="col-desc">-</td><td class="col-changed">-</td></tr>'
+                rows = rows .. RI .. listing_row("../index.html", "..")
             end
 
             table.sort(children, function(a, b) return a.name < b.name end)
@@ -1026,12 +1087,12 @@ local function walk_and_process(current_path, output_root, strip_path, theme)
                 local link = child.rel .. "/index.html"
                 local suffix = (child.type == "dir" and "/" or "")
                 local desc_td = format_description(child.description)
-                rows = rows .. RI .. string.format('<tr><td><a href="%s">%s%s</a></td>%s<td class="col-changed">%s</td></tr>', attr_escape(link), html_escape(child.name), suffix, desc_td, html_escape(child.age or "-"))
+                rows = rows .. RI .. listing_row(link, child.name .. suffix, desc_td, child.age or "-")
             end
 
             -- Same nav-only-at-root rule as generate_parent_indexes: skip
             -- the breadcrumb where it would just repeat "Repositories".
-            local index_content = #header_parts == 0 and "" or ("<h2>" .. breadcrumb_trail(header_parts) .. "</h2>" .. CI)
+            local index_content = #header_parts == 0 and "" or (el("h2", nil, raw(breadcrumb_trail(header_parts))) .. CI)
             index_content = index_content .. files_table(rows, false)
             local page_title = (#header_parts == 0 and "Repositories" or table.concat(header_parts, " / "))
             -- Only created once we know this directory (or a descendant)
