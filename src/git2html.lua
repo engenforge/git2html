@@ -202,7 +202,8 @@ end
 -- Preserve HTML comments (ignored by the validator) and bare <br>/<hr> void
 -- tags; escape everything else so it renders as literal text.
 local function sanitize_raw_html(s)
-    if s:match("^<!%-%-.*%-%->%s*$") then
+    local inner = s:match("^<!%-%-(.*)%-%->%s*$")
+    if inner and not inner:find("-->", 1, true) then
         return s
     end
     local void_tag = s:match("^<%s*([bBhH][rR])%s*/?%s*>%s*$")
@@ -560,7 +561,7 @@ local function breadcrumb_trail(parts)
         local part_rel = ""
         for _ = 1, up_levels do part_rel = part_rel .. "../" end
         local link_target = (up_levels == 0 and "index.html" or part_rel .. "index.html")
-        html = html .. string.format('<a href="%s">%s</a>', link_target, part)
+        html = html .. string.format('<a href="%s">%s</a>', link_target, html_escape(part))
     end
     return html
 end
@@ -581,7 +582,7 @@ local function release_line(header_parts)
     local base = release_url_base:gsub("/+$", "")
     local url = base .. "/" .. table.concat(header_parts, "/") .. "/"
     return string.format('<p class="release-url">Releases at <a href="%s">%s</a></p>' .. CI,
-        html_escape(url), html_escape(url))
+        attr_escape(url), html_escape(url))
 end
 
 
@@ -679,7 +680,7 @@ local function template(page_title, content, rel_path)
 </div>
 </body>
 </html>
-]], site_lang, page_title, rel_path, get_header(), rel_path, content, get_footer())
+]], attr_escape(site_lang), html_escape(page_title), rel_path, get_header(), rel_path, content, get_footer())
 end
 
 local function generate_parent_indexes(output_root, header_parts, theme)
@@ -691,12 +692,12 @@ local function generate_parent_indexes(output_root, header_parts, theme)
             local rel_output = table.concat(parts, "/")
             local target_output = output_root .. (rel_output == "" and "" or "/" .. rel_output)
             register_expected_dir(target_output)
-            os.execute("mkdir -p " .. target_output)
+            os.execute("mkdir -p " .. sh_quote(target_output))
             local rel_to_root = ""
             for _ = 1, i do rel_to_root = rel_to_root .. "../" end
             
             local next_part = header_parts[i+1]
-            local rows = RI .. string.format('<tr><td><a href="%s/index.html">%s/</a></td><td class="col-desc">-</td><td class="col-changed">-</td></tr>', next_part, next_part)
+            local rows = RI .. string.format('<tr><td><a href="%s/index.html">%s/</a></td><td class="col-desc">-</td><td class="col-changed">-</td></tr>', attr_escape(next_part), html_escape(next_part))
             if i > 0 then
                 rows = RI .. '<tr><td><a href="../index.html">..</a></td><td class="col-desc">-</td><td class="col-changed">-</td></tr>' .. rows
             end
@@ -760,7 +761,7 @@ local function repo_template(header_parts, page_title, content, rel_path)
 </div>
 </body>
 </html>
-]], site_lang, page_title, rel_path, get_header(), nav_prefix, rel_path, repo_name, rel_path, content, get_footer())
+]], attr_escape(site_lang), html_escape(page_title), rel_path, get_header(), nav_prefix, rel_path, html_escape(repo_name), rel_path, content, get_footer())
 end
 
 local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, metadata)
@@ -792,13 +793,13 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
         local name = f.path:match("([^/]+)$") or f.path
         local desc_td = format_description(f.description)
         if f.is_dir then
-            rows = rows .. RI .. string.format('<tr><td><a href="%s/index.html">%s/</a></td>%s<td class="col-changed">%s</td></tr>', name, name, desc_td, f.last_changed)
+            rows = rows .. RI .. string.format('<tr><td><a href="%s/index.html">%s/</a></td>%s<td class="col-changed">%s</td></tr>', attr_escape(name), html_escape(name), desc_td, html_escape(f.last_changed))
             register_expected_dir(output_dir .. "/" .. f.path)
-            os.execute("mkdir -p " .. output_dir .. "/" .. f.path)
+            os.execute("mkdir -p " .. sh_quote(output_dir .. "/" .. f.path))
             generate_repo_tree(repo_path, output_dir, header_parts, f.path, metadata)
         else
             local file_view_path = name .. ".html"
-            rows = rows .. RI .. string.format('<tr><td><a href="%s">%s</a></td>%s<td class="col-changed">%s</td></tr>', file_view_path, name, desc_td, f.last_changed)
+            rows = rows .. RI .. string.format('<tr><td><a href="%s">%s</a></td>%s<td class="col-changed">%s</td></tr>', attr_escape(file_view_path), html_escape(name), desc_td, html_escape(f.last_changed))
             
             local source = repo_path .. "/" .. f.path
 
@@ -822,7 +823,7 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
                 else
                     local ext = name:match("%.([^%.]+)$")
                     local ext_lower = ext and ext:lower()
-                    local file_breadcrumbs = breadcrumbs .. " / " .. name
+                    local file_breadcrumbs = breadcrumbs .. " / " .. html_escape(name)
                     local body
 
                     if ext_lower == "png" or ext_lower == "jpg" or ext_lower == "jpeg" then
@@ -846,7 +847,7 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
                         body = string.format(
                             '<h2>%s</h2>' .. CI .. '<p class="meta">Binary file, %s.</p>' .. CI
                             .. '<p><a href="%s">Download %s</a></p>',
-                            file_breadcrumbs, human_size(size), name, name)
+                            file_breadcrumbs, human_size(size), attr_escape(name), html_escape(name))
                     end
 
                     write_file(html_target,
@@ -884,7 +885,7 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
                             html_content = '<pre tabindex="0"><code>' .. hl_to_html(content, lang) .. "</code></pre>"
                         end
 
-                        local file_breadcrumbs = breadcrumbs .. " / " .. name
+                        local file_breadcrumbs = breadcrumbs .. " / " .. html_escape(name)
                         write_file(html_target, repo_template(header_parts, display_name .. " - " .. f.path, "<h2>" .. file_breadcrumbs .. "</h2>" .. CI .. html_content, rel_to_root))
                     end
                 end
@@ -921,7 +922,7 @@ end
 local function generate_repo_site(repo_path, target_output, header_parts, theme, output_root)
     progress("Processing repository: " .. table.concat(header_parts, " / "))
     register_expected_dir(target_output)
-    os.execute("mkdir -p " .. target_output)
+    os.execute("mkdir -p " .. sh_quote(target_output))
 
     install_theme(theme, target_output .. "/style.css")
 
@@ -931,7 +932,9 @@ local function generate_repo_site(repo_path, target_output, header_parts, theme,
     local log_data = git.get_log(repo_path)
     local log_rows = ""
     for _, c in ipairs(log_data) do
-        log_rows = log_rows .. RI .. string.format("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>", c.hash, c.date, c.subject, c.author)
+        log_rows = log_rows .. RI .. string.format(
+            "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>",
+            html_escape(c.hash), html_escape(c.date), html_escape(c.subject), html_escape(c.author))
     end
     local log_html = log_table(log_rows)
     write_file(target_output .. "/log.html", repo_template(header_parts, header_parts[#header_parts] .. " - Log", log_html))
@@ -1023,7 +1026,7 @@ local function walk_and_process(current_path, output_root, strip_path, theme)
                 local link = child.rel .. "/index.html"
                 local suffix = (child.type == "dir" and "/" or "")
                 local desc_td = format_description(child.description)
-                rows = rows .. RI .. string.format('<tr><td><a href="%s">%s%s</a></td>%s<td class="col-changed">%s</td></tr>', link, child.name, suffix, desc_td, child.age or "-")
+                rows = rows .. RI .. string.format('<tr><td><a href="%s">%s%s</a></td>%s<td class="col-changed">%s</td></tr>', attr_escape(link), html_escape(child.name), suffix, desc_td, html_escape(child.age or "-"))
             end
 
             -- Same nav-only-at-root rule as generate_parent_indexes: skip
@@ -1037,7 +1040,7 @@ local function walk_and_process(current_path, output_root, strip_path, theme)
             -- as an empty directory.
             if #header_parts > 0 or has_multiple_repos then
                 register_expected_dir(target_output)
-                os.execute("mkdir -p " .. target_output)
+                os.execute("mkdir -p " .. sh_quote(target_output))
                 write_file(target_output .. "/index.html", template(page_title, index_content, rel_to_root))
             end
 

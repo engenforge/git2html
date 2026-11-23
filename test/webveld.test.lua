@@ -95,37 +95,59 @@ if not validate then
     return
 end
 
-local temp_repo = "/tmp/git2html-webveld-repo"
+local temp_root = "/tmp/git2html-webveld-root"
+local temp_repo = temp_root .. "/alpha"
+local temp_repo2 = temp_root .. "/group/beta"
 local output_dir = "/tmp/git2html-webveld-output"
 local theme_probe = "/tmp/git2html-theme-probe.html"
 
 local function build_fixture()
-    os.execute("rm -rf " .. temp_repo .. " && mkdir -p " .. temp_repo
-        .. " && git -C " .. temp_repo .. " init >/dev/null 2>&1")
+    os.execute("rm -rf " .. temp_root .. " && mkdir -p " .. temp_repo .. " " .. temp_repo2
+        .. " && git -C " .. temp_repo .. " init >/dev/null 2>&1"
+        .. " && git -C " .. temp_repo2 .. " init >/dev/null 2>&1")
 
-    -- A README exercises the markdown writer, a Lua file the highlighter, and
-    -- a nested directory the breadcrumb and parent-index paths.
+    -- A README exercises the markdown writer (including extensions and raw HTML
+    -- sanitization), a Lua file the highlighter, nested directories and a second
+    -- repo the breadcrumb, root index, and parent-index templates.
     local readme = io.open(temp_repo .. "/README.md", "w")
-    readme:write("# Fixture\n\nA paragraph with a [link](https://example.com), "
+    readme:write("---\ntitle: Fixture <alpha> & \"quotes\"\nstatus: active\n---\n\n"
+        .. "# Fixture\n\nA paragraph with a [link](https://example.com), "
         .. "angle-bracket placeholders <text>, Vec<T>, <point>, "
         .. "a raw <script>alert(1)</script> tag, and a line<br>break.\n\n"
         .. "<!-- a markdown comment -->\n\n"
+        .. "<!-- comment 1 --><badtag><!-- comment 2 -->\n\n"
         .. "### Skipped Heading\n\n"
-        .. "#### Deeper Heading\n\n"
+        .. "#### Deeper Heading {#deep .custom}\n\n"
         .. "### Sibling Heading\n\n"
+        .. "Formatting: ~~strike~~, ==mark==, H~2~O, x^2^, [span]{.badge}, footnote[^1], and inline^[inline note].\n\n"
+        .. "[^1]: Footnote body with <u8> & text.\n\n"
+        .. "- [x] Done task\n- [ ] Open task\n\n"
+        .. "A. Alpha item\nB. Beta item\n\n"
+        .. "I. Roman item\n\n"
+        .. "Term\n: Definition text\n\n"
+        .. "::: {.callout}\nFenced div content.\n:::\n\n"
         .. "```lua\nlocal x = 1 -- comment\n```\n\n"
-        .. "| a | b |\n| - | - |\n| 1 | 2 |\n")
+        .. "```c++\nstd::vector<int> v;\n```\n\n"
+        .. "```foo\"onclick=\"alert(1)\nquoted lang tag\n```\n\n"
+        .. "| a | b |\n| :- | -: |\n| 1 | 2 |\n")
     readme:close()
 
     os.execute("mkdir -p " .. temp_repo .. "/doc")
     local doc_md = io.open(temp_repo .. "/doc/notes.md", "w")
-    doc_md:write("#### Deep Start\n\nSome <text> and Option<T> in prose.\n")
+    doc_md:write("---\nitems:\n  - complex\n  - frontmatter <u8>\n---\n\n"
+        .. "#### Deep Start\n\nSome <text> and Option<T> in prose.\n")
     doc_md:close()
 
     os.execute("mkdir -p " .. temp_repo .. "/src")
     local src = io.open(temp_repo .. "/src/main.lua", "w")
     src:write('local function greet(name)\n  return "hello " .. name\nend\nreturn greet\n')
     src:close()
+
+    -- Exercise special characters in filenames and directory names
+    os.execute("mkdir -p '" .. temp_repo .. "/dir&sub'")
+    local special = io.open(temp_repo .. "/dir&sub/a&b.txt", "w")
+    special:write("file with ampersand in path\n")
+    special:close()
 
     local png = "\137PNG\r\n\26\n\0\0\0\13IHDR\0\0\0\1\0\0\0\1\8\2\0\0\0\144wS"
         .. "\222\0\0\0\12IDATx\156c\248\207\192\0\0\3\1\1\0\24\221\141\176\0\0\0"
@@ -142,12 +164,27 @@ local function build_fixture()
     bin:write("\0\1\2\3\4\5")
     bin:close()
 
+    local desc = io.open(temp_repo .. "/.git/description", "w")
+    desc:write('A long repository description with <u8> & "quotes" that exceeds fifty characters to trigger truncation\n')
+    desc:close()
+
     os.execute("git -C " .. temp_repo .. " add -A >/dev/null 2>&1")
     os.execute("git -C " .. temp_repo
         .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -m 'fixture' >/dev/null 2>&1")
+    os.execute("echo 'update' >> " .. temp_repo .. "/sample.txt && git -C " .. temp_repo .. " add sample.txt && git -C " .. temp_repo
+        .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit --author='Alice & Bob <t@e>' -m 'use Vec<u8> & Option<T> here' >/dev/null 2>&1")
+
+    -- Second repo inside a nested group to exercise multi-repo root and parent index templates
+    local b_readme = io.open(temp_repo2 .. "/README.md", "w")
+    b_readme:write("# Beta\n\nSecond repo for multi-repo index validation.\n")
+    b_readme:close()
+    os.execute("git -C " .. temp_repo2 .. " add -A >/dev/null 2>&1")
+    os.execute("git -C " .. temp_repo2
+        .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -m 'init beta' >/dev/null 2>&1")
 
     os.execute("rm -rf " .. output_dir)
-    os.execute(runner.bin .. " " .. temp_repo .. " " .. output_dir .. " >/dev/null 2>&1")
+    os.execute(runner.bin .. " -c https://git.example.com -r https://releases.example.com "
+        .. temp_root .. " " .. output_dir .. " " .. temp_root .. " >/dev/null 2>&1")
 end
 
 build_fixture()
@@ -160,6 +197,21 @@ end
 
 runner.test("webveld: fixture produced pages to validate", function()
     assert(#pages > 0, "no HTML generated in " .. output_dir)
+    local page_set = {}
+    for _, p in ipairs(pages) do
+        page_set[p:gsub("^" .. output_dir:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1") .. "/", "")] = true
+    end
+    for _, expected in ipairs({
+        "index.html",
+        "group/index.html",
+        "alpha/index.html",
+        "alpha/log.html",
+        "alpha/dir&sub/index.html",
+        "alpha/dir&sub/a&b.txt.html",
+        "group/beta/index.html",
+    }) do
+        assert(page_set[expected], "expected generated page missing from fixture: " .. expected)
+    end
 end)
 
 runner.test("webveld: every generated page conforms", function()
@@ -239,6 +291,6 @@ runner.test("webveld: bundled themes contain no forbidden CSS", function()
         #failures, #themes, table.concat(failures, "\n  ")))
 end)
 
-os.execute("rm -rf " .. output_dir .. " " .. temp_repo .. " " .. theme_probe)
+os.execute("rm -rf " .. output_dir .. " " .. temp_root .. " " .. theme_probe)
 
 runner.summary()
