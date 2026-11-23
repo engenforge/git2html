@@ -15,6 +15,8 @@ git2html \- generate static HTML from a git repository
 .PP
 \fBgit2html\fR [\-v] [\-Q] [\-p] [\-c <clone\-url\-base>] [\-r <release\-url\-base>] [\-f <footer\-file>] [\-h <header\-file>] [\-l <lang>] [\-t <theme>] <repo\-path\-or\-url> <output\-dir> [strip\-path] [theme]
 .PP
+\fBgit2html\fR \-\-version
+.PP
 .SH DESCRIPTION
 .PP
 \fBgit2html\fR generates a folder containing static HTML files and supporting
@@ -101,6 +103,11 @@ WebVeld specification requires (section 4.\&1).\& Defaults to \fBen\fR.\&
 Select the theme without needing an empty \fB""\fR placeholder for
 \fBstrip\-path\fR.\& Takes precedence over the positional \fB[theme]\fR argument.\&
 See \fBARGUMENTS\fR below for the accepted values.\&
+.PP
+.RE
+\fB\-\-version\fR
+.RS 4
+Print version information and exit.\&
 .PP
 .RE
 .SH ARGUMENTS

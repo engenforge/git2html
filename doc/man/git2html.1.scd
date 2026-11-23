@@ -8,6 +8,8 @@ git2html - generate static HTML from a git repository
 
 *git2html* [-v] [-Q] [-p] [-c <clone-url-base>] [-r <release-url-base>] [-f <footer-file>] [-h <header-file>] [-l <lang>] [-t <theme>] <repo-path-or-url> <output-dir> [strip-path] [theme]
 
+*git2html* --version
+
 # DESCRIPTION
 
 *git2html* generates a folder containing static HTML files and supporting
@@ -71,6 +73,9 @@ The generated site includes:
 	Select the theme without needing an empty *""* placeholder for
 	*strip-path*. Takes precedence over the positional *[theme]* argument.
 	See *ARGUMENTS* below for the accepted values.
+
+*--version*
+	Print version information and exit.
 
 # ARGUMENTS
 

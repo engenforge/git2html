@@ -1046,6 +1046,42 @@ local function walk_and_process(current_path, output_root, strip_path, theme)
     end
 end
 
+local function get_version()
+    if _G2H_VERSION then
+        return _G2H_VERSION
+    end
+    local ver = nil
+    local f = io.open(repo_root .. "/README.md", "r")
+    if f then
+        local in_ver = false
+        for line in f:lines() do
+            if in_ver then
+                ver = line:match("^%s*(.-)%s*$")
+                break
+            end
+            if line:match("^## Version") then
+                in_ver = true
+            end
+        end
+        f:close()
+    end
+    local desc = nil
+    local p = io.popen("git -C " .. string.format("%q", repo_root) .. " describe --tags --always 2>/dev/null")
+    if p then
+        desc = p:read("*line")
+        p:close()
+        if desc == "" then desc = nil end
+    end
+    if ver and desc then
+        return ver .. " (" .. desc .. ")"
+    elseif ver then
+        return ver
+    elseif desc then
+        return desc
+    end
+    return "unknown"
+end
+
 local function main(raw_args)
     local args = {}
     local theme_flag = nil
@@ -1053,7 +1089,10 @@ local function main(raw_args)
     local i = 1
     while i <= #raw_args do
         local arg = raw_args[i]
-        if arg == "-v" then
+        if arg == "--version" then
+            print("git2html " .. get_version())
+            os.exit(0)
+        elseif arg == "-v" then
             verbose = true
         elseif arg == "-Q" or arg == "--quiet" then
             quiet = true

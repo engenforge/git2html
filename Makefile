@@ -7,6 +7,8 @@ BUILD ?= build
 VERSION ?= $(shell awk '/^## Version/{getline; print; exit}' README.md)
 GIT_COMMIT := $(shell git rev-parse --short=12 HEAD 2>/dev/null)
 GIT_TAG := $(shell git describe --tags --exact-match HEAD 2>/dev/null)
+GIT_DESCRIBE ?= $(shell git describe --tags --always 2>/dev/null)
+FULL_VERSION = $(if $(GIT_DESCRIBE),$(VERSION) ($(GIT_DESCRIBE)),$(VERSION))
 DIST_VERSION ?= $(if $(GIT_TAG),$(patsubst v%,%,$(GIT_TAG)),$(VERSION)-g$(GIT_COMMIT))
 DIST_NAME := git2html-$(DIST_VERSION)
 UNAME_S := $(shell uname -s | tr '[:upper:]' '[:lower:]')
@@ -122,8 +124,8 @@ $(BUILD)/bundle_data.c: tools/gen_bundle.lua src/git2html.lua src/git_utils.lua 
 $(OBJ)/bundle_data.o: $(BUILD)/bundle_data.c src/bundle_data.h | $(OBJ)
 	$(STATIC_CC) -std=gnu99 -O1 -I$(LUA_SRC) -Isrc -I$(BUILD) -c $< -o $@
 
-$(OBJ)/bundle_main.o: src/bundle_main.c src/bundle_data.h | $(OBJ)
-	$(STATIC_CC) -std=gnu99 -O2 -Wall -Wextra -I$(LUA_SRC) -Isrc -I$(BUILD) -c $< -o $@
+$(OBJ)/bundle_main.o: src/bundle_main.c src/bundle_data.h README.md | $(OBJ)
+	$(STATIC_CC) -std=gnu99 -O2 -Wall -Wextra -DG2H_VERSION='"$(FULL_VERSION)"' -I$(LUA_SRC) -Isrc -I$(BUILD) -c $< -o $@
 
 $(BUILD)/git2html: $(OBJ)/bundle_main.o $(OBJ)/bundle_data.o $(LPEG_O) $(LUA_O)
 	$(STATIC_CC) -static -o $@ $^ -lm
@@ -260,7 +262,7 @@ dist:
 	mkdir -p $(DIST_DIR) $(DIST_STAGE)
 	$(call export-public-tree,$(DIST_STAGE)/$(DIST_NAME))
 	cd $(DIST_STAGE) && $(REPRO_TAR) -cf $(CURDIR)/$(DIST_DIR)/$(DIST_NAME).tar $(DIST_NAME)
-	$(MAKE) -s -C $(DIST_STAGE)/$(DIST_NAME) install DESTDIR=$(CURDIR)/$(DIST_STAGE)/install-root PREFIX=$(PREFIX) SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) > /dev/null
+	$(MAKE) -s -C $(DIST_STAGE)/$(DIST_NAME) install DESTDIR=$(CURDIR)/$(DIST_STAGE)/install-root PREFIX=$(PREFIX) SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) GIT_DESCRIBE="$(GIT_DESCRIBE)" > /dev/null
 	cd $(DIST_STAGE)/install-root && $(REPRO_TAR) -cf $(CURDIR)/$(DIST_DIR)/$(DIST_BIN_NAME).tar .
 	cd $(DIST_DIR) && for t in *.tar; do $(XZ) -9 -T1 "$$t" || exit 1; done
 	cd $(DIST_DIR) && $(SHA256SUM) *.tar.xz > SHA256SUMS

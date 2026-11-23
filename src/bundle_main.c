@@ -16,6 +16,10 @@
 
 #include "bundle_data.h"
 
+#ifndef G2H_VERSION
+#define G2H_VERSION "unknown"
+#endif
+
 int luaopen_lpeg(lua_State *L);
 
 static int l_c_is_newer(lua_State *L) {
@@ -106,6 +110,10 @@ int main(int argc, char **argv) {
         lua_setfield(L, -2, g2h_modules[i].name);
     }
     lua_pop(L, 2); /* preload, package */
+
+    /* Expose the build-time version string to git2html.lua. */
+    lua_pushstring(L, G2H_VERSION);
+    lua_setglobal(L, "_G2H_VERSION");
 
     /* Expose the bundled theme CSS to git2html.lua's theme selection. */
     lua_newtable(L);

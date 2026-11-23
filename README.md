@@ -71,7 +71,10 @@ make install PREFIX=/usr/local
 ```
 
 ## Usage
-`git2html [-v] [-Q] [-c clone-url-base] [-r release-url-base] [-f footer-file] [-h header-file] [-l lang] [-t theme] <repo-path-or-url> <output-dir> [strip-path] [theme]`
+`git2html [-v] [-Q] [-p] [-c clone-url-base] [-r release-url-base] [-f footer-file] [-h header-file] [-l lang] [-t theme] <repo-path-or-url> <output-dir> [strip-path] [theme]`
+`git2html --version`
+
+`--version` prints version information and exits.
 
 By default git2html prints one progress line per repository and per directory. `-Q` (or `--quiet`) suppresses all normal output, including the final completion message; errors are still reported. `-v` adds per-file detail.
 
