@@ -32,6 +32,12 @@ runner.test("fancy_lists does not turn single-word paragraphs like Body. into em
     local roman_html = (fancy_parse("ii. first\niii. second\n\n"))
     assert(roman_html:match('<ol class="list%-lower%-roman"'),
         "expected lower-roman list, got: " .. roman_html)
+    local indented_roman = (fancy_parse("  ii. first\n  iii. second\n\n"))
+    assert(indented_roman:match('<ol class="list%-lower%-roman"'),
+        "expected 2-space-indented lower-roman list, got: " .. indented_roman)
+    local ill_html = (fancy_parse("ill.\n\n"))
+    assert(ill_html:match("<p>ill%.</p>"),
+        "expected <p>ill.</p>, got: " .. ill_html)
 end)
 
 runner.test("markdown to html converts links", function()

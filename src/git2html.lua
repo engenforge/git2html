@@ -883,7 +883,7 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
                 else
                     local ext = name:match("%.([^%.]+)$")
                     local ext_lower = ext and ext:lower()
-                    local file_breadcrumbs = raw(breadcrumbs .. " / " .. html_escape(name))
+                    local file_breadcrumbs = { raw(breadcrumbs), " / ", name }
                     local body
 
                     if ext_lower == "png" or ext_lower == "jpg" or ext_lower == "jpeg" then
@@ -943,7 +943,7 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
                             html_content = el("pre", { tabindex = "0" }, raw(el("code", nil, raw(hl_to_html(content, lang)))))
                         end
 
-                        local file_breadcrumbs = raw(breadcrumbs .. " / " .. html_escape(name))
+                        local file_breadcrumbs = { raw(breadcrumbs), " / ", name }
                         write_file(html_target, repo_template(header_parts, display_name .. " - " .. f.path, el("h2", nil, file_breadcrumbs) .. CI .. html_content, rel_to_root))
                     end
                 end

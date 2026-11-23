@@ -955,12 +955,16 @@ function M.new(writer, options)
   larsers.numdelim = parsers.period
   local num1, num2, num3, num_any
   if options.fancy_lists then
-    local roman_upper = S("IVXL")
-    local roman_lower = S("ivxl")
+    local roman_u_char = S("IVXL")
+    local roman_l_char = S("ivxl")
+    local roman_upper = (P("L") * P("X")^-3 + P("XL") + P("X") * P("X")^-2) * (P("IX") + P("IV") + P("V") * P("I")^-3 + P("I")^-3)
+                      + (P("IX") + P("IV") + P("V") * P("I")^-3 + P("I") * P("I")^-2)
+    local roman_lower = (P("l") * P("x")^-3 + P("xl") + P("x") * P("x")^-2) * (P("ix") + P("iv") + P("v") * P("i")^-3 + P("i")^-3)
+                      + (P("ix") + P("iv") + P("v") * P("i")^-3 + P("i") * P("i")^-2)
     num1 = larsers.dig + parsers.letter
-    num2 = larsers.dig^2 + roman_upper^2 + roman_lower^2
-    num3 = larsers.dig^3 + roman_upper^3 + roman_lower^3
-    num_any = larsers.dig^1 + parsers.letter + roman_upper^2 + roman_lower^2
+    num2 = larsers.dig^2 + #(roman_u_char^2) * roman_upper + #(roman_l_char^2) * roman_lower
+    num3 = larsers.dig^3 + #(roman_u_char^3) * roman_upper + #(roman_l_char^3) * roman_lower
+    num_any = larsers.dig^1 + roman_upper + roman_lower + parsers.letter
     larsers.numdelim = larsers.numdelim + parsers.rparent
   else
     num1 = larsers.dig
