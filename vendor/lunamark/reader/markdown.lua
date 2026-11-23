@@ -953,22 +953,33 @@ function M.new(writer, options)
   end
 
   larsers.numdelim = parsers.period
+  local num1, num2, num3, num_any
   if options.fancy_lists then
-    larsers.dig = larsers.dig + parsers.letter
+    local roman_upper = S("IVXL")
+    local roman_lower = S("ivxl")
+    num1 = larsers.dig + parsers.letter
+    num2 = larsers.dig^2 + roman_upper^2 + roman_lower^2
+    num3 = larsers.dig^3 + roman_upper^3 + roman_lower^3
+    num_any = larsers.dig^1 + parsers.letter + roman_upper^2 + roman_lower^2
     larsers.numdelim = larsers.numdelim + parsers.rparent
+  else
+    num1 = larsers.dig
+    num2 = larsers.dig^2
+    num3 = larsers.dig^3
+    num_any = larsers.dig^1
   end
 
-  larsers.enumerator = C(larsers.dig^3 * larsers.numdelim) * #parsers.spacing
-                     + C(larsers.dig^2 * larsers.numdelim) * #parsers.spacing
+  larsers.enumerator = C(num3 * larsers.numdelim) * #parsers.spacing
+                     + C(num2 * larsers.numdelim) * #parsers.spacing
                                        * (parsers.tab + parsers.space^1)
-                     + C(larsers.dig * larsers.numdelim) * #parsers.spacing
+                     + C(num1 * larsers.numdelim) * #parsers.spacing
                                      * (parsers.tab + parsers.space^-2)
-                     + parsers.space * C(larsers.dig^2 * larsers.numdelim)
+                     + parsers.space * C(num2 * larsers.numdelim)
                                      * #parsers.spacing
-                     + parsers.space * C(larsers.dig * larsers.numdelim)
+                     + parsers.space * C(num1 * larsers.numdelim)
                                      * #parsers.spacing
                                      * (parsers.tab + parsers.space^-1)
-                     + parsers.space * parsers.space * C(larsers.dig^1
+                     + parsers.space * parsers.space * C(num_any
                                      * larsers.numdelim) * #parsers.spacing
 
   ------------------------------------------------------------------------------

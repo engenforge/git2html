@@ -18,6 +18,22 @@ runner.test("markdown to html converts paragraphs", function()
     assert(md("Hello world\n\n"):match("<p>Hello world</p>"))
 end)
 
+runner.test("fancy_lists does not turn single-word paragraphs like Body. into empty list items", function()
+    local fancy_parse = lunamark.reader.markdown.new(writer, { fancy_lists = true })
+    local body_html = (fancy_parse("Body.\n\n"))
+    assert(body_html:match("<p>Body%.</p>"),
+        "expected <p>Body.</p>, got: " .. body_html)
+    local multi_html = (fancy_parse("Hello. World.\n\n"))
+    assert(multi_html:match("<p>Hello%. World%.</p>"),
+        "expected <p>Hello. World.</p>, got: " .. multi_html)
+    local alpha_html = (fancy_parse("a. first\nb. second\n\n"))
+    assert(alpha_html:match('<ol class="list%-lower%-alpha">'),
+        "expected lower-alpha list, got: " .. alpha_html)
+    local roman_html = (fancy_parse("ii. first\niii. second\n\n"))
+    assert(roman_html:match('<ol class="list%-lower%-roman"'),
+        "expected lower-roman list, got: " .. roman_html)
+end)
+
 runner.test("markdown to html converts links", function()
     assert(md("[link](url)\n"):match("<a href=\"url\">link</a>"))
 end)
