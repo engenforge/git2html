@@ -129,7 +129,8 @@ local function build_fixture()
         .. "```lua\nlocal x = 1 -- comment\n```\n\n"
         .. "```c++\nstd::vector<int> v;\n```\n\n"
         .. "```foo\"onclick=\"alert(1)\nquoted lang tag\n```\n\n"
-        .. "| a | b |\n| :- | -: |\n| 1 | 2 |\n")
+        .. "| a | b |\n| :- | -: |\n| 1 | 2 |\n\n"
+        .. "![pixel](pixel.png){width=\"10\"} and ![pixel2](pixel.png){height=\"10\"}\n")
     readme:close()
 
     os.execute("mkdir -p " .. temp_repo .. "/doc")

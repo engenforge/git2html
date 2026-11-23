@@ -57,8 +57,8 @@ function M.new(options)
        then titattr = " title=\"" .. Html.string(tit) .. "\""
        else titattr = ""
     end
-    local w = attr and attr.width and ' width="'..attr.width..'"'
-    local h = attr and attr.height and ' height="'..attr.height..'"'
+    local w = attr and attr.width and (' width="' .. Html.string(attr.width) .. '"') or ""
+    local h = attr and attr.height and (' height="' .. Html.string(attr.height) .. '"') or ""
     return {"<img src=\"", Html.string(src), "\" alt=\"", lab, "\"", titattr, w, h, " />"}
   end
 

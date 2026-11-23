@@ -38,6 +38,19 @@ runner.test("markdown to html converts links", function()
     assert(md("[link](url)\n"):match("<a href=\"url\">link</a>"))
 end)
 
+runner.test("image with only width or height closes tag and escapes attributes", function()
+    local attr_parse = lunamark.reader.markdown.new(writer, { link_attributes = true })
+    local w_only = (attr_parse('![alt](pic.png){width="100"}\n\n'))
+    assert(w_only:match('<img src="pic%.png" alt="alt" width="100" />'),
+        "expected closed img with width, got: " .. w_only)
+    local h_only = (attr_parse('![alt](pic.png){height="50"}\n\n'))
+    assert(h_only:match('<img src="pic%.png" alt="alt" height="50" />'),
+        "expected closed img with height, got: " .. h_only)
+    local escaped = (attr_parse("![alt](pic.png){width='100\"x'}\n\n"))
+    assert(escaped:match('width="100&quot;x" />'),
+        "expected escaped width attribute and closed img, got: " .. escaped)
+end)
+
 
 -- Links inside rendered markdown must point at the generated pages, not at the
 -- source paths. Every file in a repository is published as <path>.html, so a

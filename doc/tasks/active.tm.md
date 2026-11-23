@@ -8,5 +8,7 @@
     > **Completed:** 2026-11-23
 
     Introduce lightweight `el(tag, attrs, children)` and `raw(html)` helpers in `src/git2html.lua` that automatically `html_escape` plain string children and `attr_escape` attribute values by default, requiring explicit `raw(...)` opt-out for pre-rendered HTML (markdown, syntax highlighting, nested elements). Migrate table rows, breadcrumbs, navigation, and page templates so forgetting to escape git metadata or paths becomes structurally impossible.
-- [ ] Fix truncated `<img>` closing tag in vendored lunamark when only `width` or `height` is set
+- [x] Fix truncated `<img>` closing tag in vendored lunamark when only `width` or `height` is set
+    > **Completed:** 2026-11-23
+
     In `vendor/lunamark/writer/html.lua` (`Html.image`), `w` or `h` evaluates to `nil` when omitted, which terminates the returned sequence table early and drops the closing ` />` (e.g. `![alt](pic.png){width="100"}` emits `<img src="pic.png" alt="alt" width="100"`). Default missing `w`/`h` to `""`, attribute-escape their values, and add a regression test in `test/markdown.test.lua` and `test/webveld.test.lua`.
