@@ -158,6 +158,48 @@ runner.test("manifest: --prune without output-dir prunes only inside each target
     os.execute("rm -rf " .. base)
 end)
 
+runner.test("manifest: --prune-targets with output-dir prunes only each target_dir and preserves siblings", function()
+    local base = "/tmp/git2html-manifest-prune-targets"
+    os.execute("rm -rf " .. base)
+    local r1 = base .. "/src/r1"
+    local r2 = base .. "/src/r2"
+    init_repo(r1, { ["a.txt"] = "a\n" })
+    init_repo(r2, { ["b.txt"] = "b\n" })
+
+    local out_root = base .. "/out"
+    os.execute("mkdir -p " .. out_root .. "/themes " .. out_root .. "/r1 " .. out_root .. "/group/r2")
+    local icon = assert(io.open(out_root .. "/icon.png", "w"))
+    icon:write("icon-data")
+    icon:close()
+    local theme_css = assert(io.open(out_root .. "/themes/site.css", "w"))
+    theme_css:write("body{}")
+    theme_css:close()
+    local stale1 = assert(io.open(out_root .. "/r1/stale.html", "w"))
+    stale1:write("remove1")
+    stale1:close()
+    local stale2 = assert(io.open(out_root .. "/group/r2/stale.html", "w"))
+    stale2:write("remove2")
+    stale2:close()
+
+    local manifest = base .. "/manifest.tsv"
+    local mf = assert(io.open(manifest, "w"))
+    mf:write(r1 .. "\tr1\n")
+    mf:write(r2 .. "\tgroup/r2\n")
+    mf:close()
+
+    local ok = os.execute(runner.bin .. " -Q --prune-targets --manifest " .. manifest .. " " .. out_root .. " 2>/dev/null")
+    assert(ok, "git2html --manifest --prune-targets with output-dir failed")
+
+    assert(read_all(out_root .. "/r1/index.html"), "r1 index missing")
+    assert(read_all(out_root .. "/group/r2/index.html"), "group/r2 index missing")
+    assert(not read_all(out_root .. "/r1/stale.html"), "stale.html inside r1 should be pruned")
+    assert(not read_all(out_root .. "/group/r2/stale.html"), "stale.html inside group/r2 should be pruned")
+    assert(read_all(out_root .. "/icon.png") == "icon-data", "sibling icon.png in output-dir must be preserved")
+    assert(read_all(out_root .. "/themes/site.css") == "body{}", "sibling themes/site.css in output-dir must be preserved")
+
+    os.execute("rm -rf " .. base)
+end)
+
 runner.test("manifest: rejects empty, malformed, invalid repo, and invalid theme manifests", function()
     local base = "/tmp/git2html-manifest-errors"
     os.execute("rm -rf " .. base)

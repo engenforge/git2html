@@ -63,4 +63,15 @@ runner.test("--version still prints when -Q is passed", function()
     assert(out:find("git2html " .. ver, 1, true), "expected version output, got: " .. out)
 end)
 
+runner.test("--help prints standard and --manifest usage lines and exits 0", function()
+    local out, ok = run_cmd(runner.bin .. " --help")
+    assert(ok, "--help should exit with status 0")
+    assert(out:find("<repo-path-or-url> <output-dir>", 1, true),
+        "expected standard usage line in --help output, got: " .. out)
+    assert(out:find("--manifest <file|-> [output-dir]", 1, true),
+        "expected --manifest usage line in --help output, got: " .. out)
+    assert(out:find("--prune-targets", 1, true),
+        "expected --prune-targets in --help output, got: " .. out)
+end)
+
 runner.summary()

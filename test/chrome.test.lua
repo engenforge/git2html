@@ -129,10 +129,10 @@ runner.test("chrome: <!-- @@REPONAV@@ --> merges repo nav into custom header and
     local repo = base .. "/myrepo"
     init_repo(repo, { ["readme.txt"] = "hello\n" })
 
-    -- Header WITH <!-- @@REPONAV@@ -->
+    -- Header WITH <!-- @@REPONAV@@ --> inside a single-row <p class="nav">
     local hdr_merge = base .. "/header-merge.html"
     local hf = assert(io.open(hdr_merge, "w"))
-    hf:write('<header class="masthead"><nav aria-label="Primary"><p class="site-nav"><a href="@@PATHTOROOT@@index.html">Site</a></p><!-- @@REPONAV@@ --></nav></header>')
+    hf:write('<header class="masthead"><nav aria-label="Primary"><p class="nav"><a href="@@PATHTOROOT@@index.html">Site</a> <span class="nav-trail"><!-- @@REPONAV@@ --></span></p></nav></header>')
     hf:close()
 
     local out1 = base .. "/out1"
@@ -141,9 +141,11 @@ runner.test("chrome: <!-- @@REPONAV@@ --> merges repo nav into custom header and
 
     local idx = assert(read_all(out1 .. "/myrepo/index.html"))
     assert(not idx:find("@@REPONAV@@", 1, true), "REPONAV placeholder should be substituted")
-    assert(idx:find('<p class="nav">', 1, true), "repo nav <p class=\"nav\"> should be present")
+    assert(idx:find('<span class="nav-trail"><a ', 1, true), "REPONAV should emit bare inner links without wrapping <p class=\"nav\">")
     assert(idx:find('<a href="log.html">Log</a>', 1, true), "Log link should be inside merged nav")
-    -- Only ONE <header class="masthead"> should appear (the custom one, not a duplicate)
+    -- Only ONE <p class="nav"> (from custom header) and ONE <header class="masthead"> should appear
+    local _, p_count = idx:gsub('<p class="nav">', "")
+    assert(p_count == 1, "expected exactly 1 <p class=\"nav\"> when merged, got " .. tostring(p_count))
     local _, count = idx:gsub('<header class="masthead">', "")
     assert(count == 1, "expected exactly 1 masthead header when merged, got " .. tostring(count))
 

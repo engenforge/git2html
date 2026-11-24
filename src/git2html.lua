@@ -887,7 +887,7 @@ local function page_shell(page_title, rel_path, nav_html, content, site_rel)
     local nav_p = el("p", { class = "nav" }, raw("\n            " .. nav_html .. "\n            "))
     local header_html = get_header(path_to_root)
     local merged_header, merged_count = header_html:gsub("<!%-%-%s*@@REPONAV@@%s*%-%->", function()
-        return nav_p
+        return nav_html
     end)
     local header_block
     if merged_count > 0 then
@@ -1588,17 +1588,27 @@ local function parse_manifest(manifest_path)
     return entries
 end
 
+local function print_usage()
+    print("Usage: git2html [-v] [-Q|--quiet] [-p|--prune] [--no-index] [--root-offset offset] [--icon href] [-c clone-url-base] [-r release-url-base] [-f footer-file] [-h header-file] [-l lang] [-t theme] <repo-path-or-url> <output-dir> [strip-path] [theme]")
+    print("       git2html [-v] [-Q|--quiet] [-p|--prune] [--prune-targets] [--no-index] [--root-offset offset] [--icon href] [-c clone-url-base] [-r release-url-base] [-f footer-file] [-h header-file] [-l lang] [-t theme] --manifest <file|-> [output-dir]")
+    print("       git2html --version | --help")
+end
+
 local function main(raw_args)
     local t_main = prof_enabled and prof_now()
     local args = {}
     local theme_flag = nil
     local manifest_file = nil
     local clean_dest = false
+    local prune_targets = false
     local i = 1
     while i <= #raw_args do
         local arg = raw_args[i]
         if arg == "--version" then
             print("git2html " .. get_version())
+            os.exit(0)
+        elseif arg == "--help" then
+            print_usage()
             os.exit(0)
         elseif arg == "-v" then
             verbose = true
@@ -1606,6 +1616,8 @@ local function main(raw_args)
             quiet = true
         elseif arg == "-p" or arg == "--prune" then
             clean_dest = true
+        elseif arg == "--prune-targets" then
+            prune_targets = true
         elseif arg == "--no-index" then
             no_index = true
         elseif arg == "--root-offset" then
@@ -1647,7 +1659,7 @@ local function main(raw_args)
 
     if manifest_file then
         if #args > 1 then
-            print("Usage: git2html [-v] [-Q|--quiet] [-p|--prune] [--no-index] [--root-offset offset] [--icon href] [-c clone-url-base] [-r release-url-base] [-f footer-file] [-h header-file] [-l lang] [-t theme] --manifest <file|-> [output-dir]")
+            print_usage()
             os.exit(1)
         end
 
@@ -1732,7 +1744,11 @@ local function main(raw_args)
 
         flush_render_jobs()
 
-        if clean_dest then
+        if prune_targets then
+            for _, entry in ipairs(entries) do
+                clean_destination_tree(entry.target_output)
+            end
+        elseif clean_dest then
             if output_dir then
                 clean_destination_tree(output_dir)
             else
@@ -1748,7 +1764,7 @@ local function main(raw_args)
     end
 
     if #args < 2 then
-        print("Usage: git2html [-v] [-Q|--quiet] [-p|--prune] [--no-index] [--root-offset offset] [--icon href] [-c clone-url-base] [-r release-url-base] [-f footer-file] [-h header-file] [-l lang] [-t theme] <repo-path-or-url> <output-dir> [strip-path] [theme]")
+        print_usage()
         os.exit(1)
     end
 
