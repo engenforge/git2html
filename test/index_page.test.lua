@@ -78,4 +78,50 @@ runner.test("discovery with multiple repos directly under path: generates the ro
     os.execute("rm -rf " .. root_dir .. " " .. output_dir)
 end)
 
+runner.test("--no-index skips the root index.html in multi-repo discovery", function()
+    local root_dir = "/tmp/git2html-noindex-root"
+    local repo1 = root_dir .. "/group/repo1"
+    local repo2 = root_dir .. "/group/repo2"
+    local output_dir = "/tmp/git2html-noindex-out"
+    os.execute("rm -rf " .. root_dir .. " " .. output_dir)
+    os.execute("mkdir -p " .. repo1 .. " " .. repo2)
+    os.execute("git -C " .. repo1 .. " init >/dev/null 2>&1")
+    os.execute("touch " .. repo1 .. "/f && git -C " .. repo1 .. " add f && git -C " .. repo1 .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -m 'init' >/dev/null 2>&1")
+    os.execute("git -C " .. repo2 .. " init >/dev/null 2>&1")
+    os.execute("touch " .. repo2 .. "/f && git -C " .. repo2 .. " add f && git -C " .. repo2 .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -m 'init' >/dev/null 2>&1")
+
+    local ok = os.execute(runner.bin .. " --no-index " .. root_dir .. " " .. output_dir .. " " .. root_dir .. " >/dev/null 2>&1")
+    assert(ok, "git2html --no-index failed")
+
+    assert(not os.execute("test -f " .. output_dir .. "/index.html"), "root index.html should be skipped with --no-index")
+    assert(os.execute("test -f " .. output_dir .. "/style.css"), "style.css should still be generated")
+    assert(os.execute("test -f " .. output_dir .. "/group/index.html"), "intermediate group index.html should still be generated")
+    assert(os.execute("test -f " .. output_dir .. "/group/repo1/index.html"), "repo1 index missing")
+    assert(os.execute("test -f " .. output_dir .. "/group/repo2/index.html"), "repo2 index missing")
+
+    os.execute("rm -rf " .. root_dir .. " " .. output_dir)
+end)
+
+runner.test("--no-index with --prune removes existing root index.html", function()
+    local root_dir = "/tmp/git2html-noindex-prune-root"
+    local repo1 = root_dir .. "/repo1"
+    local repo2 = root_dir .. "/repo2"
+    local output_dir = "/tmp/git2html-noindex-prune-out"
+    os.execute("rm -rf " .. root_dir .. " " .. output_dir)
+    os.execute("mkdir -p " .. repo1 .. " " .. repo2 .. " " .. output_dir)
+    os.execute("git -C " .. repo1 .. " init >/dev/null 2>&1")
+    os.execute("touch " .. repo1 .. "/f && git -C " .. repo1 .. " add f && git -C " .. repo1 .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -m 'init' >/dev/null 2>&1")
+    os.execute("git -C " .. repo2 .. " init >/dev/null 2>&1")
+    os.execute("touch " .. repo2 .. "/f && git -C " .. repo2 .. " add f && git -C " .. repo2 .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -m 'init' >/dev/null 2>&1")
+    os.execute("echo 'stale' > " .. output_dir .. "/index.html")
+
+    local ok = os.execute(runner.bin .. " --no-index --prune " .. root_dir .. " " .. output_dir .. " " .. root_dir .. " >/dev/null 2>&1")
+    assert(ok, "git2html --no-index --prune failed")
+
+    assert(not os.execute("test -f " .. output_dir .. "/index.html"), "stale root index.html should be pruned with --no-index --prune")
+    assert(os.execute("test -f " .. output_dir .. "/repo1/index.html"), "repo1 index missing")
+
+    os.execute("rm -rf " .. root_dir .. " " .. output_dir)
+end)
+
 runner.summary()

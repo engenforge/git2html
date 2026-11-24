@@ -6,7 +6,9 @@ git2html - generate static HTML from a git repository
 
 # SYNOPSIS
 
-*git2html* [-v] [-Q] [-p] [-c <clone-url-base>] [-r <release-url-base>] [-f <footer-file>] [-h <header-file>] [-l <lang>] [-t <theme>] <repo-path-or-url> <output-dir> [strip-path] [theme]
+*git2html* [-v] [-Q] [-p] [--no-index] [--root-offset <offset>] [--icon <href>] [-c <clone-url-base>] [-r <release-url-base>] [-f <footer-file>] [-h <header-file>] [-l <lang>] [-t <theme>] <repo-path-or-url> <output-dir> [strip-path] [theme]
+
+*git2html* [-v] [-Q] [-p] [--no-index] [--root-offset <offset>] [--icon <href>] [-c <clone-url-base>] [-r <release-url-base>] [-f <footer-file>] [-h <header-file>] [-l <lang>] [-t <theme>] --manifest <file|-> [output-dir]
 
 *git2html* --version
 
@@ -39,6 +41,38 @@ The generated site includes:
 	Remove files and empty directories in the destination that are not part
 	of what is generated.
 
+*--no-index*
+	Skip generating the root *index.html* in *<output-dir>*. Repository
+	pages, intermediate group indexes, and *style.css* are still generated.
+	Useful when an external tool provides its own repository index.
+
+*--manifest* <file|->
+	Read a list of repositories to render from <file> (or standard input
+	when *-* is given) instead of taking a single *<repo-path-or-url>*.
+	Each non-empty, non-comment (*#*) line specifies
+	*<repo-path><TAB><target-dir>[<TAB><theme>]* (or whitespace-separated
+	fields when paths contain no spaces). Relative *<target-dir>* paths are
+	resolved against the optional *[output-dir]* argument, or the current
+	working directory if omitted. When *<theme>* is omitted, the default
+	theme (from *-t* or *auto*) is used. All repositories are rendered in a
+	single invocation sharing the parallel render queue. When combined with
+	*-p*/*--prune*, *[output-dir]* is pruned if given; otherwise each
+	entry's *<target-dir>* is pruned individually.
+
+*--root-offset* <offset>
+	Relative path prefix (such as *../* or *../../*) or non-negative
+	directory depth (such as *1* or *2*) from the output root back to the
+	enclosing site root. Combined with each page's own relative depth when
+	substituting *@@PATHTOROOT@@* in custom *-h*/*-f* fragments and when
+	resolving relative *--icon* paths. Defaults to empty (output root is
+	the site root).
+
+*--icon* <href>
+	Emit a *<link rel="icon" href="...">* element in every page's *<head>*.
+	Relative paths are resolved against the site root (incorporating
+	*--root-offset* and each page's depth); root-absolute paths (starting
+	with */*) and URLs with a scheme are emitted as-is.
+
 *-c* <clone-url-base>
 	Show a "Git clone via ..." line above the file listing on each
 	repository's Files page. git2html appends the repository's own path
@@ -59,11 +93,17 @@ The generated site includes:
 
 *-f* <footer-file>
 	Path to an HTML file to use as a custom footer on every page. The token
-	*{{date}}* in this file will be replaced with the generation timestamp.
+	*{{date}}* in this file will be replaced with the generation timestamp,
+	and *@@PATHTOROOT@@* with the page's relative path back to the site
+	root.
 
 *-h* <header-file>
 	Path to an HTML file to use as a custom header on every page, shown
-	above the navigation bar. Supports the *{{date}}* token as *-f* does.
+	above the navigation bar. Supports the *{{date}}* and *@@PATHTOROOT@@*
+	tokens as *-f* does. If the file contains the placeholder
+	*<!-- @@REPONAV@@ -->*, *git2html* substitutes its *<p class="nav">...</p>*
+	navigation bar directly in place of the placeholder and omits the
+	default *<header class="masthead">* wrapper.
 
 *-l* <lang>
 	Language tag for the *lang* attribute on the *html* element, which the

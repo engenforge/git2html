@@ -5,7 +5,7 @@
 .nh
 .ad l
 .\" Begin generated content:
-.TH "git2html" "1" "2026\-11\-18"
+.TH "git2html" "1" "2026\-11\-24"
 .PP
 .SH NAME
 .PP
@@ -13,7 +13,9 @@ git2html \- generate static HTML from a git repository
 .PP
 .SH SYNOPSIS
 .PP
-\fBgit2html\fR [\-v] [\-Q] [\-p] [\-c <clone\-url\-base>] [\-r <release\-url\-base>] [\-f <footer\-file>] [\-h <header\-file>] [\-l <lang>] [\-t <theme>] <repo\-path\-or\-url> <output\-dir> [strip\-path] [theme]
+\fBgit2html\fR [\-v] [\-Q] [\-p] [\-\-no\-index] [\-\-root\-offset <offset>] [\-\-icon <href>] [\-c <clone\-url\-base>] [\-r <release\-url\-base>] [\-f <footer\-file>] [\-h <header\-file>] [\-l <lang>] [\-t <theme>] <repo\-path\-or\-url> <output\-dir> [strip\-path] [theme]
+.PP
+\fBgit2html\fR [\-v] [\-Q] [\-p] [\-\-no\-index] [\-\-root\-offset <offset>] [\-\-icon <href>] [\-c <clone\-url\-base>] [\-r <release\-url\-base>] [\-f <footer\-file>] [\-h <header\-file>] [\-l <lang>] [\-t <theme>] \-\-manifest <file|\-> [output\-dir]
 .PP
 \fBgit2html\fR \-\-version
 .PP
@@ -58,6 +60,46 @@ Remove files and empty directories in the destination that are not part
 of what is generated.\&
 .PP
 .RE
+\fB\-\-no\-index\fR
+.RS 4
+Skip generating the root \fBindex.\&html\fR in \fB<output\-dir>\fR.\& Repository
+pages, intermediate group indexes, and \fBstyle.\&css\fR are still generated.\&
+Useful when an external tool provides its own repository index.\&
+.PP
+.RE
+\fB\-\-manifest\fR <file|\->
+.RS 4
+Read a list of repositories to render from <file> (or standard input
+when \fB\-\fR is given) instead of taking a single \fB<repo\-path\-or\-url>\fR.\&
+Each non\-empty, non\-comment (\fB#\fR) line specifies
+\fB<repo\-path><TAB><target\-dir>[<TAB><theme>]\fR (or whitespace\-separated
+fields when paths contain no spaces).\& Relative \fB<target\-dir>\fR paths are
+resolved against the optional \fB[output\-dir]\fR argument, or the current
+working directory if omitted.\& When \fB<theme>\fR is omitted, the default
+theme (from \fB\-t\fR or \fBauto\fR) is used.\& All repositories are rendered in a
+single invocation sharing the parallel render queue.\& When combined with
+\fB\-p\fR/\fB\-\-prune\fR, \fB[output\-dir]\fR is pruned if given; otherwise each
+entry'\&s \fB<target\-dir>\fR is pruned individually.\&
+.PP
+.RE
+\fB\-\-root\-offset\fR <offset>
+.RS 4
+Relative path prefix (such as \fB.\&.\&/\fR or \fB.\&.\&/.\&.\&/\fR) or non\-negative
+directory depth (such as \fB1\fR or \fB2\fR) from the output root back to the
+enclosing site root.\& Combined with each page'\&s own relative depth when
+substituting \fB@@PATHTOROOT@@\fR in custom \fB\-h\fR/\fB\-f\fR fragments and when
+resolving relative \fB\-\-icon\fR paths.\& Defaults to empty (output root is
+the site root).\&
+.PP
+.RE
+\fB\-\-icon\fR <href>
+.RS 4
+Emit a \fB<link rel="icon" href=".\&.\&.\&">\fR element in every page'\&s \fB<head>\fR.\&
+Relative paths are resolved against the site root (incorporating
+\fB\-\-root\-offset\fR and each page'\&s depth); root\-absolute paths (starting
+with \fB/\fR) and URLs with a scheme are emitted as\-is.\&
+.PP
+.RE
 \fB\-c\fR <clone\-url\-base>
 .RS 4
 Show a "Git clone via .\&.\&.\&" line above the file listing on each
@@ -83,13 +125,19 @@ Omitted by default.\&
 \fB\-f\fR <footer\-file>
 .RS 4
 Path to an HTML file to use as a custom footer on every page.\& The token
-\fB{{date}}\fR in this file will be replaced with the generation timestamp.\&
+\fB{{date}}\fR in this file will be replaced with the generation timestamp,
+and \fB@@PATHTOROOT@@\fR with the page'\&s relative path back to the site
+root.\&
 .PP
 .RE
 \fB\-h\fR <header\-file>
 .RS 4
 Path to an HTML file to use as a custom header on every page, shown
-above the navigation bar.\& Supports the \fB{{date}}\fR token as \fB\-f\fR does.\&
+above the navigation bar.\& Supports the \fB{{date}}\fR and \fB@@PATHTOROOT@@\fR
+tokens as \fB\-f\fR does.\& If the file contains the placeholder
+\fB<!\&\-\- @@REPONAV@@ \-\->\fR, \fBgit2html\fR substitutes its \fB<p class="nav">.\&.\&.\&</p>\fR
+navigation bar directly in place of the placeholder and omits the
+default \fB<header class="masthead">\fR wrapper.\&
 .PP
 .RE
 \fB\-l\fR <lang>

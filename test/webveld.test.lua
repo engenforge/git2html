@@ -184,7 +184,7 @@ local function build_fixture()
         .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -m 'init beta' >/dev/null 2>&1")
 
     os.execute("rm -rf " .. output_dir)
-    os.execute(runner.bin .. " -c https://git.example.com -r https://releases.example.com "
+    os.execute(runner.bin .. " -c https://git.example.com -r https://releases.example.com --icon favicon.png "
         .. temp_root .. " " .. output_dir .. " " .. temp_root .. " >/dev/null 2>&1")
 end
 

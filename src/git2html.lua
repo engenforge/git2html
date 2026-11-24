@@ -31,6 +31,20 @@ local clone_url_base = nil
 -- the releases line at all.
 local release_url_base = nil
 local has_multiple_repos = false
+local no_index = false
+local root_offset = ""
+local icon_href = nil
+
+local function normalize_root_offset(val)
+    if not val or val == "" then return "" end
+    if val:match("^%d+$") then
+        return string.rep("../", tonumber(val))
+    end
+    if val:sub(-1) ~= "/" then
+        return val .. "/"
+    end
+    return val
+end
 
 local prof_enabled = os.getenv("GIT2HTML_PROFILE") ~= nil and os.getenv("GIT2HTML_PROFILE") ~= ""
 local prof_totals = {}
@@ -806,12 +820,16 @@ local function log_table(rows)
     ))
 end
 
-local function get_footer()
-    local content
+local cached_footer_path, cached_footer_raw
+local function get_footer(path_to_root)
     if footer_file then
-        content = read_file(footer_file)
-        if content then
-            content = content:gsub("{{date}}", generation_date or "")
+        if cached_footer_path ~= footer_file then
+            cached_footer_path = footer_file
+            cached_footer_raw = read_file(footer_file)
+        end
+        if cached_footer_raw then
+            local content = cached_footer_raw:gsub("{{date}}", function() return generation_date or "" end)
+            content = content:gsub("@@PATHTOROOT@@", function() return path_to_root or "" end)
             return content
         end
     end
@@ -826,33 +844,65 @@ end
 
 -- Empty by default: unlike the footer, there's no sensible built-in content
 -- to show above the nav bar, so a caller who doesn't pass -h just gets one.
-local function get_header()
+local cached_header_path, cached_header_raw
+local function get_header(path_to_root)
     if header_file then
-        local content = read_file(header_file)
-        if content then
-            return content:gsub("{{date}}", generation_date or "")
+        if cached_header_path ~= header_file then
+            cached_header_path = header_file
+            cached_header_raw = read_file(header_file)
+        end
+        if cached_header_raw then
+            local content = cached_header_raw:gsub("{{date}}", function() return generation_date or "" end)
+            content = content:gsub("@@PATHTOROOT@@", function() return path_to_root or "" end)
+            return content
         end
     end
     return ""
 end
 
-local function page_shell(page_title, rel_path, nav_html, content)
+local function resolve_icon_href(href, path_to_root)
+    if not href or href == "" then return nil end
+    if href:sub(1, 1) == "/" or href:match("^%a[%w+.-]*:") then
+        return href
+    end
+    return (path_to_root or "") .. href:gsub("^%./", "")
+end
+
+local function page_shell(page_title, rel_path, nav_html, content, site_rel)
     rel_path = rel_path or ""
+    local path_to_root = (site_rel or rel_path) .. root_offset
+    local icon_link = ""
+    local resolved_icon = resolve_icon_href(icon_href, path_to_root)
+    if resolved_icon then
+        icon_link = "\n    " .. el("link", { { "rel", "icon" }, { "href", resolved_icon } })
+    end
     local head = el("head", nil, raw("\n    "
         .. el("meta", { charset = "UTF-8" }) .. "\n    "
         .. el("title", nil, page_title) .. "\n    "
         .. el("meta", { { "name", "viewport" }, { "content", "width=device-width, initial-scale=1" } }) .. "\n    "
         .. el("meta", { { "name", "color-scheme" }, { "content", "light dark" } }) .. "\n    "
         .. el("meta", { { "name", "generator" }, { "content", "git2html" } }) .. "\n    "
-        .. el("link", { { "rel", "stylesheet" }, { "href", rel_path .. "style.css" } }) .. "\n"))
+        .. el("link", { { "rel", "stylesheet" }, { "href", rel_path .. "style.css" } })
+        .. icon_link .. "\n"))
+    local nav_p = el("p", { class = "nav" }, raw("\n            " .. nav_html .. "\n            "))
+    local header_html = get_header(path_to_root)
+    local merged_header, merged_count = header_html:gsub("<!%-%-%s*@@REPONAV@@%s*%-%->", function()
+        return nav_p
+    end)
+    local header_block
+    if merged_count > 0 then
+        header_block = merged_header
+    else
+        header_block = header_html .. "\n    "
+            .. el("header", { class = "masthead" }, raw("\n        "
+                .. el("nav", { ["aria-label"] = "Primary" }, raw("\n            "
+                    .. nav_p .. "\n        ")) .. "\n    "))
+    end
     local body = el("body", nil, raw("\n" .. el("div", { class = "site-container" }, raw("\n    "
         .. el("a", { class = "skip", href = "#content" }, "Skip to content") .. "\n    "
-        .. get_header() .. "\n    "
-        .. el("header", { class = "masthead" }, raw("\n        "
-            .. el("nav", { ["aria-label"] = "Primary" }, raw("\n            "
-                .. el("p", { class = "nav" }, raw("\n            " .. nav_html .. "\n            ")) .. "\n        ")) .. "\n    ")) .. "\n    "
+        .. header_block .. "\n    "
         .. el("main", { class = "page", id = "content", tabindex = "-1" }, raw("\n        " .. content .. "\n    ")) .. "\n    "
-        .. get_footer() .. "\n")) .. "\n"))
+        .. get_footer(path_to_root) .. "\n")) .. "\n"))
     return "<!DOCTYPE html>\n" .. el("html", { lang = site_lang }, raw("\n" .. head .. "\n" .. body .. "\n")) .. "\n"
 end
 
@@ -864,12 +914,12 @@ end
 local function template(page_title, content, rel_path)
     rel_path = rel_path or ""
     local nav_html = el("a", { href = rel_path .. "index.html" }, "Repositories")
-    return page_shell(page_title, rel_path, nav_html, content)
+    return page_shell(page_title, rel_path, nav_html, content, rel_path)
 end
 
 local function generate_parent_indexes(output_root, header_parts, theme)
     for i = 0, #header_parts - 1 do
-        if i > 0 or has_multiple_repos then
+        if i > 0 or (has_multiple_repos and not no_index) then
             local parts = {}
             for j = 1, i do table.insert(parts, header_parts[j]) end
             
@@ -920,7 +970,7 @@ local function repo_template(header_parts, page_title, content, rel_path)
         .. " &middot; "
         .. el("a", { href = rel_path .. "log.html" }, "Log")
 
-    return page_shell(page_title, rel_path, nav_html, content)
+    return page_shell(page_title, rel_path, nav_html, content, site_rel)
 end
 
 local function stamp_hash(s)
@@ -1239,7 +1289,9 @@ local function generate_repo_site(repo_path, target_output, header_parts, theme,
 
     install_theme(theme, target_output .. "/style.css")
 
-    generate_parent_indexes(output_root, header_parts, theme)
+    if output_root then
+        generate_parent_indexes(output_root, header_parts, theme)
+    end
 
     local head_hash = git.get_head(repo_path)
     local header_html = get_header()
@@ -1249,7 +1301,8 @@ local function generate_repo_site(repo_path, target_output, header_parts, theme,
     -- Repo Log
     local log_target = target_output .. "/log.html"
     local log_comment = head_hash and ("<!-- git2html-stamp: " .. head_hash .. ":" .. stamp_hash(table.concat({
-        "log", site_lang, tostring(has_multiple_repos), repo_key, generation_date or "", header_html, footer_html
+        "log", site_lang, tostring(has_multiple_repos), repo_key, generation_date or "",
+        root_offset, icon_href or "", header_html, footer_html
     }, "\0")) .. " -->\n") or nil
 
     if log_comment and file_has_stamp(log_target, log_comment) then
@@ -1282,7 +1335,7 @@ local function generate_repo_site(repo_path, target_output, header_parts, theme,
 
     local index_comment = head_hash and ("<!-- git2html-stamp: " .. head_hash .. ":" .. stamp_hash(table.concat({
         "index", site_lang, tostring(has_multiple_repos), repo_key, generation_date or "",
-        clone_url_base or "", release_url_base or "", header_html, footer_html
+        clone_url_base or "", release_url_base or "", root_offset, icon_href or "", header_html, footer_html
     }, "\0")) .. " -->\n") or nil
 
     local all_indexes_fresh = false
@@ -1406,7 +1459,7 @@ local function walk_and_process(current_path, output_root, strip_path, theme)
             -- actually has something to show -- otherwise every non-repo
             -- folder in the walked tree would be mirrored into the output
             -- as an empty directory.
-            if #header_parts > 0 or has_multiple_repos then
+            if #header_parts > 0 or (has_multiple_repos and not no_index) then
                 register_expected_dir(target_output)
                 mkdir_p(target_output)
                 write_file(target_output .. "/index.html", template(page_title, index_content, rel_to_root))
@@ -1453,10 +1506,93 @@ local function get_version()
     return "unknown"
 end
 
+local function resolve_theme(theme_input)
+    if theme_input:match("%.css$") then
+        if not file_exists(theme_input) then
+            return nil
+        end
+        return { path = theme_input }
+    elseif _EMBEDDED_THEMES and _EMBEDDED_THEMES[theme_input] then
+        return { content = _EMBEDDED_THEMES[theme_input] }
+    else
+        local paths = {
+            repo_root .. "/themes/" .. theme_input .. ".css",
+            script_dir .. "/themes/" .. theme_input .. ".css",
+        }
+        for _, p in ipairs(paths) do
+            local f = io.open(p, "r")
+            if f then
+                f:close()
+                return { path = p }
+            end
+        end
+    end
+    return nil
+end
+
+local function parse_manifest(manifest_path)
+    local fh, err
+    local close_fh = false
+    if manifest_path == "-" then
+        fh = io.stdin
+    else
+        fh, err = io.open(manifest_path, "r")
+        if not fh then
+            return nil, "Could not open manifest: " .. tostring(err)
+        end
+        close_fh = true
+    end
+
+    local entries = {}
+    local lineno = 0
+    for raw_line in fh:lines() do
+        lineno = lineno + 1
+        local line = raw_line:gsub("\r$", "")
+        if not line:match("^%s*$") and not line:match("^%s*#") then
+            local fields = {}
+            if line:find("\t", 1, true) then
+                local start = 1
+                while true do
+                    local tab = line:find("\t", start, true)
+                    if not tab then
+                        fields[#fields + 1] = line:sub(start)
+                        break
+                    end
+                    fields[#fields + 1] = line:sub(start, tab - 1)
+                    start = tab + 1
+                end
+            else
+                for field in line:gmatch("%S+") do
+                    fields[#fields + 1] = field
+                end
+            end
+
+            if (#fields ~= 2 and #fields ~= 3) or fields[1] == "" or fields[2] == "" then
+                if close_fh then fh:close() end
+                return nil, string.format("Invalid manifest entry at line %d (expected: repo_path<TAB>target_dir[<TAB>theme])", lineno)
+            end
+
+            local theme_name = (fields[3] and fields[3] ~= "") and fields[3] or nil
+            entries[#entries + 1] = {
+                repo_path = fields[1],
+                target_dir = fields[2],
+                theme_name = theme_name,
+            }
+        end
+    end
+
+    if close_fh then fh:close() end
+    if #entries == 0 then
+        return nil, "Manifest contains no entries"
+    end
+    return entries
+end
+
 local function main(raw_args)
     local t_main = prof_enabled and prof_now()
     local args = {}
     local theme_flag = nil
+    local manifest_file = nil
     local clean_dest = false
     local i = 1
     while i <= #raw_args do
@@ -1470,6 +1606,21 @@ local function main(raw_args)
             quiet = true
         elseif arg == "-p" or arg == "--prune" then
             clean_dest = true
+        elseif arg == "--no-index" then
+            no_index = true
+        elseif arg == "--root-offset" then
+            root_offset = normalize_root_offset(raw_args[i+1])
+            i = i + 1
+        elseif arg == "--icon" then
+            icon_href = raw_args[i+1]
+            i = i + 1
+        elseif arg == "--manifest" then
+            manifest_file = raw_args[i+1]
+            if not manifest_file then
+                print("Error: --manifest requires a file path or '-' for stdin")
+                os.exit(1)
+            end
+            i = i + 1
         elseif arg == "-c" then
             clone_url_base = raw_args[i+1]
             i = i + 1
@@ -1494,8 +1645,110 @@ local function main(raw_args)
         i = i + 1
     end
 
+    if manifest_file then
+        if #args > 1 then
+            print("Usage: git2html [-v] [-Q|--quiet] [-p|--prune] [--no-index] [--root-offset offset] [--icon href] [-c clone-url-base] [-r release-url-base] [-f footer-file] [-h header-file] [-l lang] [-t theme] --manifest <file|-> [output-dir]")
+            os.exit(1)
+        end
+
+        local theme_input = theme_flag or "auto"
+        local default_theme = resolve_theme(theme_input)
+        if not default_theme then
+            print("Error: Could not find theme " .. theme_input)
+            os.exit(1)
+        end
+
+        local entries, merr = parse_manifest(manifest_file)
+        if not entries then
+            print("Error: " .. merr)
+            os.exit(1)
+        end
+
+        local pwd = nil
+        local function get_pwd()
+            if not pwd then
+                local p = io.popen("pwd")
+                pwd = p and p:read("*line") or "."
+                if p then p:close() end
+            end
+            return pwd
+        end
+
+        local output_dir = args[1]
+        if output_dir then
+            if not output_dir:match("^/") then
+                output_dir = get_pwd() .. "/" .. output_dir
+            end
+            output_dir = normalize_path(output_dir)
+            register_expected_dir(output_dir)
+        end
+
+        -- Validate all repositories and themes up front before writing or pruning
+        for _, entry in ipairs(entries) do
+            if not is_dir(entry.repo_path) or not git.is_repo(entry.repo_path) then
+                print("Error: Not a git repository: " .. entry.repo_path)
+                os.exit(1)
+            end
+            if entry.theme_name then
+                entry.theme = resolve_theme(entry.theme_name)
+                if not entry.theme then
+                    print("Error: Could not find theme " .. entry.theme_name)
+                    os.exit(1)
+                end
+            else
+                entry.theme = default_theme
+            end
+
+            if entry.target_dir:match("^/") then
+                entry.target_output = normalize_path(entry.target_dir)
+            elseif output_dir then
+                entry.target_output = normalize_path(output_dir .. "/" .. entry.target_dir)
+            else
+                entry.target_output = normalize_path(get_pwd() .. "/" .. entry.target_dir)
+            end
+
+            local header_parts = {}
+            if output_dir and entry.target_output:sub(1, #output_dir + 1) == output_dir .. "/" then
+                local rel_output = entry.target_output:sub(#output_dir + 2)
+                for part in rel_output:gmatch("[^/]+") do
+                    header_parts[#header_parts + 1] = part
+                end
+            end
+            if #header_parts == 0 then
+                header_parts[1] = entry.target_output:match("([^/]+)$") or "repo"
+            end
+            entry.header_parts = header_parts
+        end
+
+        log("Initializing git2html (manifest mode)...")
+        resolve_generation_date(#entries == 1 and entries[1].repo_path or nil)
+        log("Generation date: " .. generation_date)
+        if footer_file then log("Using custom footer from: " .. footer_file) end
+        if header_file then log("Using custom header from: " .. header_file) end
+
+        for _, entry in ipairs(entries) do
+            generate_repo_site(entry.repo_path, entry.target_output, entry.header_parts, entry.theme, nil)
+        end
+
+        flush_render_jobs()
+
+        if clean_dest then
+            if output_dir then
+                clean_destination_tree(output_dir)
+            else
+                for _, entry in ipairs(entries) do
+                    clean_destination_tree(entry.target_output)
+                end
+            end
+        end
+
+        progress("Done! Static site generated for " .. #entries .. " repositories")
+        if t_main then prof_report(prof_now() - t_main) end
+        return
+    end
+
     if #args < 2 then
-        print("Usage: git2html [-v] [-Q|--quiet] [-p|--prune] [-c clone-url-base] [-r release-url-base] [-f footer-file] [-h header-file] [-l lang] [-t theme] <repo-path-or-url> <output-dir> [strip-path] [theme]")
+        print("Usage: git2html [-v] [-Q|--quiet] [-p|--prune] [--no-index] [--root-offset offset] [--icon href] [-c clone-url-base] [-r release-url-base] [-f footer-file] [-h header-file] [-l lang] [-t theme] <repo-path-or-url> <output-dir> [strip-path] [theme]")
         os.exit(1)
     end
 
@@ -1520,25 +1773,7 @@ local function main(raw_args)
     register_expected_dir(output_dir)
 
     -- Theme selection
-    local theme
-    if theme_input:match("%.css$") then
-        theme = { path = theme_input }
-    elseif _EMBEDDED_THEMES and _EMBEDDED_THEMES[theme_input] then
-        theme = { content = _EMBEDDED_THEMES[theme_input] }
-    else
-        local paths = {
-            repo_root .. "/themes/" .. theme_input .. ".css",
-            script_dir .. "/themes/" .. theme_input .. ".css",
-        }
-        for _, p in ipairs(paths) do
-            local f = io.open(p, "r")
-            if f then
-                f:close()
-                theme = { path = p }
-                break
-            end
-        end
-    end
+    local theme = resolve_theme(theme_input)
     if not theme then
         print("Error: Could not find theme " .. theme_input)
         os.exit(1)
