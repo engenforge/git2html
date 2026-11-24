@@ -57,3 +57,22 @@
     > **Completed:** 2026-11-24
 
     After completing the single-threaded Lua and C optimizations, re-profile on large repositories to determine whether rendering is still CPU-bound. If significant headroom remains, implement worker parallelism in `src/bundle_main.c` (e.g. `fork()` per repository or `pthread`s with independent `lua_State` instances) so multi-repo runs or large file trees scale across CPU cores while preserving deterministic output, progress logging, and clean error/exit handling.
+
+- [x] Add --no-index flag to skip generating the root index.html +AI-G
+    > **Completed:** 2026-11-24
+
+    Add a `--no-index` CLI option in `src/git2html.lua` that skips writing the root `<output-dir>/index.html` (in `generate_parent_indexes` and `walk_and_process`) while still generating each repository's own pages and `style.css`. This avoids wasted I/O and eliminates write races when external tools (such as `siteforge`) provide their own repository index. Document the flag in `doc/man/git2html.1.scd` (regenerate `doc/man/git2html.1` via `make man`) and add test coverage.
+
+- [x] Support a repository manifest input with per-repo output path and theme +AI-D
+    > **Completed:** 2026-11-24
+
+    Extend `src/git2html.lua` to accept a list of `(repo_path, target_dir, [theme])` entries (e.g. via `--manifest <file>` or `-` for stdin) so callers like `siteforge` can render multiple repositories with custom placement and per-repo theme overrides in a single `git2html` invocation, leveraging native multi-core parallelism (`flush_render_jobs`). Ensure theme/stylesheet placement, `--prune` / `register_expected_dir` tracking, and error handling work cleanly across manifest entries. Document the format and CLI option in `doc/man/git2html.1.scd` (`make man`) and add integration tests.
+
+- [x] Support site-root path substitution, --icon, and masthead/nav merging for custom headers +AI-D
+    > **Completed:** 2026-11-24
+
+    Eliminate the need for callers like `siteforge` to post-process every generated `.html` file by supporting native HTML chrome integration in `src/git2html.lua` (`page_shell`, `get_header`, `get_footer`):
+    1. Support a site-root / path-to-root offset (e.g. `--root-offset` or substituting `@@PATHTOROOT@@` in custom `-h`/`-f` fragments using the page's relative path back to the site root).
+    2. Add an `--icon <href>` option to emit `<link rel="icon" ...>` in `<head>` (resolving relative icon paths against the site root).
+    3. Allow merging git2html's `<p class="nav">...</p>` into a placeholder (e.g. `<!-- @@REPONAV@@ -->`) inside a custom `-h` header and omitting the duplicate `<header class="masthead">` wrapper when merged.
+    Document the new options/placeholders in `doc/man/git2html.1.scd` (`make man`) and add regression tests.
