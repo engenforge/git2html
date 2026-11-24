@@ -271,5 +271,67 @@ runner.test("prune properly removes spurious files added in output folder", func
     cleanup()
 end)
 
+runner.test("incremental rebuild skips is_binary, git.get_log, and git.get_bulk_metadata on unchanged repo", function()
+    setup_repo()
+    -- Add a binary file as well
+    local bf = io.open(repo .. "/data.bin", "wb")
+    bf:write("\0\1\2\3")
+    bf:close()
+    os.execute("git -C " .. repo .. " add -A >/dev/null 2>&1")
+    os.execute("git -C " .. repo .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -qm 'add bin' >/dev/null 2>&1")
+
+    -- First run
+    run_g2h()
+
+    -- Second run with profiling and -v
+    local p = io.popen("GIT2HTML_PROFILE=1 " .. runner.bin .. " -v " .. repo .. " " .. out .. " /tmp auto 2>&1")
+    local text = p:read("*all")
+    p:close()
+
+    assert(text:find("Skipping: log.html", 1, true), "expected Skipping: log.html on unchanged repo:\n" .. text)
+    assert(text:find("Skipping: index.html", 1, true), "expected Skipping: index.html on unchanged repo:\n" .. text)
+    assert(not text:find("git.get_log", 1, true), "git.get_log should be skipped on unchanged repo:\n" .. text)
+    assert(not text:find("git.get_bulk_metadata", 1, true), "git.get_bulk_metadata should be skipped on unchanged repo:\n" .. text)
+    assert(not text:find("is_binary", 1, true), "is_binary should be skipped on unchanged files:\n" .. text)
+
+    -- Changing -c should regenerate index.html with the clone URL
+    run_g2h("-c https://example.com/git")
+    local idx_f = assert(io.open(out .. "/git2html-incr-repo/index.html", "r"))
+    local idx_html = idx_f:read("*all"); idx_f:close()
+    assert(idx_html:find("https://example.com/git/git2html-incr-repo.git", 1, true),
+        "index.html should regenerate when -c changes")
+
+    -- Making a new commit should regenerate both log.html and index.html
+    os.execute("echo 'print(2)' > " .. repo .. "/src/main.lua")
+    os.execute("git -C " .. repo .. " add -A >/dev/null 2>&1")
+    os.execute("git -C " .. repo .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -qm 'second commit' >/dev/null 2>&1")
+    run_g2h("-c https://example.com/git")
+    local log_f = assert(io.open(out .. "/git2html-incr-repo/log.html", "r"))
+    local log_html = log_f:read("*all"); log_f:close()
+    assert(log_html:find("second commit", 1, true), "log.html should regenerate on new commit")
+
+    -- Modifying README.md in working tree without committing should regenerate root index.html
+    os.execute("sleep 1 && echo '# Updated Readme' > " .. repo .. "/README.md")
+    run_g2h("-c https://example.com/git")
+    local idx_f2 = assert(io.open(out .. "/git2html-incr-repo/index.html", "r"))
+    local idx_html2 = idx_f2:read("*all"); idx_f2:close()
+    assert(idx_html2:find("Updated Readme", 1, true), "index.html should regenerate when README.md is newer")
+
+    -- --prune on unchanged repo must keep all skipped files (including binary, log.html, index.html) and remove strays
+    local repo_out = out .. "/git2html-incr-repo"
+    local stray = repo_out .. "/stray_after_skip.tmp"
+    os.execute("touch " .. stray)
+    run_g2h("-c https://example.com/git --prune")
+    assert(not os.execute("test -f " .. stray), "stray file should be pruned")
+    assert(os.execute("test -f " .. repo_out .. "/log.html"), "skipped log.html must be preserved by --prune")
+    assert(os.execute("test -f " .. repo_out .. "/index.html"), "skipped index.html must be preserved by --prune")
+    assert(os.execute("test -f " .. repo_out .. "/src/index.html"), "skipped src/index.html must be preserved by --prune")
+    assert(os.execute("test -f " .. repo_out .. "/data.bin"), "skipped binary must be preserved by --prune")
+    assert(os.execute("test -f " .. repo_out .. "/data.bin.html"), "skipped binary html must be preserved by --prune")
+    assert(os.execute("test -f " .. repo_out .. "/src/main.lua.html"), "skipped text html must be preserved by --prune")
+
+    cleanup()
+end)
+
 cleanup()
 runner.summary()

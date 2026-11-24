@@ -240,4 +240,43 @@ runner.test("Zoril test: .zrl source and zoril fences are highlighted", function
     os.execute("rm -rf " .. output_dir .. " " .. temp_repo)
 end)
 
+runner.test("integration test: spaces and non-ASCII filenames render cleanly", function()
+    local temp_repo = "/tmp/git2html-utf8-repo"
+    local output_dir = "/tmp/git2html-utf8-output"
+    os.execute("rm -rf " .. temp_repo .. " " .. output_dir .. " && mkdir -p " .. temp_repo .. "/'my docs'")
+    os.execute("git -C " .. temp_repo .. " init >/dev/null 2>&1")
+
+    local f1 = assert(io.open(temp_repo .. "/café.txt", "w"))
+    f1:write("espresso\n")
+    f1:close()
+    local f2 = assert(io.open(temp_repo .. "/my docs/hello world.txt", "w"))
+    f2:write("greetings\n")
+    f2:close()
+
+    os.execute("git -C " .. temp_repo .. " add -A && git -C " .. temp_repo
+        .. " -c user.email=t@e -c user.name=T -c commit.gpgsign=false commit -m 'add utf8 and spaces' >/dev/null 2>&1")
+
+    local ok = os.execute(runner.bin .. " " .. temp_repo .. " " .. output_dir .. " >/dev/null 2>&1")
+    assert(ok, "git2html failed on repo with spaces and non-ASCII filenames")
+
+    local repo_dir = output_dir .. "/git2html-utf8-repo"
+    local p1 = io.open(repo_dir .. "/café.txt.html", "r")
+    assert(p1, "café.txt.html was not generated")
+    local h1 = p1:read("*all"); p1:close()
+    assert(h1:find("espresso", 1, true), "café.txt.html missing content")
+
+    local p2 = io.open(repo_dir .. "/my docs/hello world.txt.html", "r")
+    assert(p2, "my docs/hello world.txt.html was not generated")
+    local h2 = p2:read("*all"); p2:close()
+    assert(h2:find("greetings", 1, true), "hello world.txt.html missing content")
+
+    local idx = assert(io.open(repo_dir .. "/index.html", "r"))
+    local idx_html = idx:read("*all"); idx:close()
+    assert(idx_html:find("café.txt", 1, true), "index.html missing café.txt")
+    assert(idx_html:find("my docs/", 1, true), "index.html missing my docs/")
+    assert(idx_html:find("add utf8 and spaces", 1, true), "index.html missing commit description")
+
+    os.execute("rm -rf " .. output_dir .. " " .. temp_repo)
+end)
+
 runner.summary()
