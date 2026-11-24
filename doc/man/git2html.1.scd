@@ -8,9 +8,9 @@ git2html - generate static HTML from a git repository
 
 *git2html* [-v] [-Q] [-p] [--no-index] [--root-offset <offset>] [--icon <href>] [-c <clone-url-base>] [-r <release-url-base>] [-f <footer-file>] [-h <header-file>] [-l <lang>] [-t <theme>] <repo-path-or-url> <output-dir> [strip-path] [theme]
 
-*git2html* [-v] [-Q] [-p] [--no-index] [--root-offset <offset>] [--icon <href>] [-c <clone-url-base>] [-r <release-url-base>] [-f <footer-file>] [-h <header-file>] [-l <lang>] [-t <theme>] --manifest <file|-> [output-dir]
+*git2html* [-v] [-Q] [-p] [--prune-targets] [--no-index] [--root-offset <offset>] [--icon <href>] [-c <clone-url-base>] [-r <release-url-base>] [-f <footer-file>] [-h <header-file>] [-l <lang>] [-t <theme>] --manifest <file|-> [output-dir]
 
-*git2html* --version
+*git2html* --version | --help
 
 # DESCRIPTION
 
@@ -41,6 +41,12 @@ The generated site includes:
 	Remove files and empty directories in the destination that are not part
 	of what is generated.
 
+*--prune-targets*
+	In *--manifest* mode, prune only each manifest entry's *<target-dir>*
+	individually, even when *[output-dir]* is provided. This preserves
+	sibling files and directories in *[output-dir]* outside the generated
+	repository targets.
+
 *--no-index*
 	Skip generating the root *index.html* in *<output-dir>*. Repository
 	pages, intermediate group indexes, and *style.css* are still generated.
@@ -57,7 +63,9 @@ The generated site includes:
 	theme (from *-t* or *auto*) is used. All repositories are rendered in a
 	single invocation sharing the parallel render queue. When combined with
 	*-p*/*--prune*, *[output-dir]* is pruned if given; otherwise each
-	entry's *<target-dir>* is pruned individually.
+	entry's *<target-dir>* is pruned individually. Use *--prune-targets* to
+	always prune each entry's *<target-dir>* individually even when
+	*[output-dir]* is given.
 
 *--root-offset* <offset>
 	Relative path prefix (such as *../* or *../../*) or non-negative
@@ -101,9 +109,10 @@ The generated site includes:
 	Path to an HTML file to use as a custom header on every page, shown
 	above the navigation bar. Supports the *{{date}}* and *@@PATHTOROOT@@*
 	tokens as *-f* does. If the file contains the placeholder
-	*<!-- @@REPONAV@@ -->*, *git2html* substitutes its *<p class="nav">...</p>*
-	navigation bar directly in place of the placeholder and omits the
-	default *<header class="masthead">* wrapper.
+	*<!-- @@REPONAV@@ -->*, *git2html* substitutes its bare navigation
+	links (without wrapping them in *<p class="nav">...</p>*) directly in
+	place of the placeholder and omits the default
+	*<header class="masthead">* wrapper.
 
 *-l* <lang>
 	Language tag for the *lang* attribute on the *html* element, which the
@@ -116,6 +125,9 @@ The generated site includes:
 
 *--version*
 	Print version information and exit.
+
+*--help*
+	Print usage information and exit.
 
 # ARGUMENTS
 

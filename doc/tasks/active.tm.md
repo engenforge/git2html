@@ -76,3 +76,18 @@
     2. Add an `--icon <href>` option to emit `<link rel="icon" ...>` in `<head>` (resolving relative icon paths against the site root).
     3. Allow merging git2html's `<p class="nav">...</p>` into a placeholder (e.g. `<!-- @@REPONAV@@ -->`) inside a custom `-h` header and omitting the duplicate `<header class="masthead">` wrapper when merged.
     Document the new options/placeholders in `doc/man/git2html.1.scd` (`make man`) and add regression tests.
+
+- [x] Emit bare inner links for `<!-- @@REPONAV@@ -->` to support single-row nav merging
+    > **Completed:** 2026-11-24
+
+    In `page_shell` (`src/git2html.lua`), replace `<!-- @@REPONAV@@ -->` with the bare inner links (`nav_html`) instead of wrapping them in `<p class="nav">...</p>`. This stays theme-agnostic while allowing callers (such as `siteforge`) to place `<span class="nav-trail"><!-- @@REPONAV@@ --></span>` directly inside their own `<p class="nav">` for a single-row bar without invalid nested `<p>` tags. Update `doc/man/git2html.1.scd` (`make man`) and update/add tests.
+
+- [x] Add `--prune-targets` flag for per-target pruning in `--manifest` mode
+    > **Completed:** 2026-11-24
+
+    In `src/git2html.lua`, `-p`/`--prune` with `--manifest <file|-> <output-dir>` currently calls `clean_destination_tree(output_dir)`, which deletes sibling files in `output_dir` (such as `themes/`, `icon.png`, or `releases/`). Add a `--prune-targets` CLI option that prunes only each manifest entry's `<target-dir>` (`clean_destination_tree(entry.target_output)`) even when `[output-dir]` is provided, while preserving existing `-p`/`--prune` behavior. Document `--prune-targets` in `doc/man/git2html.1.scd` (`make man`), include it in CLI usage text, and add test coverage.
+
+- [x] Include `--manifest` in CLI `--help` / usage output
+    > **Completed:** 2026-11-24
+
+    `git2html --help` currently falls through to the `< 2` arguments check in `src/git2html.lua` and prints only the `<repo-path-or-url> <output-dir>` usage line, omitting `--manifest <file|-> [output-dir]` (which is already documented in `git2html(1)`). Add explicit `--help` handling (exiting 0) and include both usage lines (standard and `--manifest`) in the output, with test coverage.

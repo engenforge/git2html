@@ -15,9 +15,9 @@ git2html \- generate static HTML from a git repository
 .PP
 \fBgit2html\fR [\-v] [\-Q] [\-p] [\-\-no\-index] [\-\-root\-offset <offset>] [\-\-icon <href>] [\-c <clone\-url\-base>] [\-r <release\-url\-base>] [\-f <footer\-file>] [\-h <header\-file>] [\-l <lang>] [\-t <theme>] <repo\-path\-or\-url> <output\-dir> [strip\-path] [theme]
 .PP
-\fBgit2html\fR [\-v] [\-Q] [\-p] [\-\-no\-index] [\-\-root\-offset <offset>] [\-\-icon <href>] [\-c <clone\-url\-base>] [\-r <release\-url\-base>] [\-f <footer\-file>] [\-h <header\-file>] [\-l <lang>] [\-t <theme>] \-\-manifest <file|\-> [output\-dir]
+\fBgit2html\fR [\-v] [\-Q] [\-p] [\-\-prune\-targets] [\-\-no\-index] [\-\-root\-offset <offset>] [\-\-icon <href>] [\-c <clone\-url\-base>] [\-r <release\-url\-base>] [\-f <footer\-file>] [\-h <header\-file>] [\-l <lang>] [\-t <theme>] \-\-manifest <file|\-> [output\-dir]
 .PP
-\fBgit2html\fR \-\-version
+\fBgit2html\fR \-\-version | \-\-help
 .PP
 .SH DESCRIPTION
 .PP
@@ -60,6 +60,14 @@ Remove files and empty directories in the destination that are not part
 of what is generated.\&
 .PP
 .RE
+\fB\-\-prune\-targets\fR
+.RS 4
+In \fB\-\-manifest\fR mode, prune only each manifest entry'\&s \fB<target\-dir>\fR
+individually, even when \fB[output\-dir]\fR is provided.\& This preserves
+sibling files and directories in \fB[output\-dir]\fR outside the generated
+repository targets.\&
+.PP
+.RE
 \fB\-\-no\-index\fR
 .RS 4
 Skip generating the root \fBindex.\&html\fR in \fB<output\-dir>\fR.\& Repository
@@ -79,7 +87,9 @@ working directory if omitted.\& When \fB<theme>\fR is omitted, the default
 theme (from \fB\-t\fR or \fBauto\fR) is used.\& All repositories are rendered in a
 single invocation sharing the parallel render queue.\& When combined with
 \fB\-p\fR/\fB\-\-prune\fR, \fB[output\-dir]\fR is pruned if given; otherwise each
-entry'\&s \fB<target\-dir>\fR is pruned individually.\&
+entry'\&s \fB<target\-dir>\fR is pruned individually.\& Use \fB\-\-prune\-targets\fR to
+always prune each entry'\&s \fB<target\-dir>\fR individually even when
+\fB[output\-dir]\fR is given.\&
 .PP
 .RE
 \fB\-\-root\-offset\fR <offset>
@@ -135,9 +145,10 @@ root.\&
 Path to an HTML file to use as a custom header on every page, shown
 above the navigation bar.\& Supports the \fB{{date}}\fR and \fB@@PATHTOROOT@@\fR
 tokens as \fB\-f\fR does.\& If the file contains the placeholder
-\fB<!\&\-\- @@REPONAV@@ \-\->\fR, \fBgit2html\fR substitutes its \fB<p class="nav">.\&.\&.\&</p>\fR
-navigation bar directly in place of the placeholder and omits the
-default \fB<header class="masthead">\fR wrapper.\&
+\fB<!\&\-\- @@REPONAV@@ \-\->\fR, \fBgit2html\fR substitutes its bare navigation
+links (without wrapping them in \fB<p class="nav">.\&.\&.\&</p>\fR) directly in
+place of the placeholder and omits the default
+\fB<header class="masthead">\fR wrapper.\&
 .PP
 .RE
 \fB\-l\fR <lang>
@@ -156,6 +167,11 @@ See \fBARGUMENTS\fR below for the accepted values.\&
 \fB\-\-version\fR
 .RS 4
 Print version information and exit.\&
+.PP
+.RE
+\fB\-\-help\fR
+.RS 4
+Print usage information and exit.\&
 .PP
 .RE
 .SH ARGUMENTS
