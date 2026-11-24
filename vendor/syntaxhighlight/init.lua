@@ -155,6 +155,39 @@ merge_adjacent = function(tuples)
   end
   return out
 end
+local escape_text = function(text)
+  return (text:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;"):gsub("'", "&#39;"))
+end
+local get_c_class_map
+get_c_class_map = function(lex, class_prefix)
+  if not lex._EXTRASTYLES then
+    return nil
+  end
+  local maps = lex._g2h_class_maps
+  if not maps then
+    maps = { }
+    lex._g2h_class_maps = maps
+  end
+  local cached = maps[class_prefix]
+  if cached ~= nil then
+    return cached or nil
+  end
+  local map = { }
+  local has_any = false
+  for k, v in pairs(lex._EXTRASTYLES) do
+    local other_tags = parse_extra_styles(v)
+    if #other_tags > 0 then
+      local parts = { escape_text(class_prefix .. k) }
+      for idx = 1, #other_tags do
+        parts[#parts + 1] = escape_text(class_prefix .. other_tags[idx])
+      end
+      map[k] = table.concat(parts, " ")
+      has_any = true
+    end
+  end
+  maps[class_prefix] = has_any and map or false
+  return has_any and map or nil
+end
 local highlight_to_html
 highlight_to_html = function(language, code, opts)
   if opts == nil then
@@ -169,11 +202,12 @@ highlight_to_html = function(language, code, opts)
   if not (tokens) then
     return nil, err
   end
+  if _G.c_tokens_to_html then
+    local class_map = get_c_class_map(lex, class_prefix)
+    return _G.c_tokens_to_html(code, tokens, class_map, class_prefix, opts.bare)
+  end
   local cache = { }
   local tagged_tokens = merge_adjacent(tag_tokens(code, tokens))
-  local escape_text = function(text)
-    return (text:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;"):gsub("'", "&#39;"))
-  end
   local buffer = { }
   if not (opts.bare) then
     table.insert(buffer, '<pre class="')

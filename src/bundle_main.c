@@ -6,9 +6,15 @@
  * sibling files on disk.
  */
 #define _POSIX_C_SOURCE 200809L
+#include <dirent.h>
+#include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "lua.h"
 #include "lauxlib.h"
@@ -39,6 +45,435 @@ static int l_c_is_newer(lua_State *L) {
         return 1;
     }
     lua_pushboolean(L, 0);
+    return 1;
+}
+
+static int l_c_monotonic_time(lua_State *L) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    lua_pushnumber(L, (lua_Number)ts.tv_sec + (lua_Number)ts.tv_nsec * 1e-9);
+    return 1;
+}
+
+static int l_c_mkdir_p(lua_State *L) {
+    size_t len = 0;
+    const char *path = luaL_checklstring(L, 1, &len);
+    if (len == 0) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+
+    char stack_buf[1024];
+    char *buf = (len < sizeof(stack_buf)) ? stack_buf : (char *)malloc(len + 1);
+    if (!buf) {
+        return luaL_error(L, "out of memory in c_mkdir_p");
+    }
+    memcpy(buf, path, len + 1);
+
+    while (len > 1 && buf[len - 1] == '/') {
+        buf[--len] = '\0';
+    }
+
+    for (char *p = buf + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            if (mkdir(buf, 0777) != 0) {
+                struct stat st;
+                if (errno != EEXIST || stat(buf, &st) != 0 || !S_ISDIR(st.st_mode)) {
+                    if (buf != stack_buf) free(buf);
+                    lua_pushboolean(L, 0);
+                    return 1;
+                }
+            }
+            *p = '/';
+        }
+    }
+
+    if (mkdir(buf, 0777) != 0) {
+        struct stat st;
+        if (errno != EEXIST || stat(buf, &st) != 0 || !S_ISDIR(st.st_mode)) {
+            if (buf != stack_buf) free(buf);
+            lua_pushboolean(L, 0);
+            return 1;
+        }
+    }
+
+    if (buf != stack_buf) free(buf);
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+static int l_c_is_dir(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    struct stat st;
+    lua_pushboolean(L, stat(path, &st) == 0 && S_ISDIR(st.st_mode));
+    return 1;
+}
+
+static int l_c_file_exists(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    struct stat st;
+    lua_pushboolean(L, stat(path, &st) == 0 && S_ISREG(st.st_mode));
+    return 1;
+}
+
+static int l_c_readdir(lua_State *L) {
+    size_t dir_len = 0;
+    const char *path = luaL_checklstring(L, 1, &dir_len);
+    lua_newtable(L);
+    DIR *d = opendir(path);
+    if (!d) {
+        return 1;
+    }
+
+    int idx = 1;
+    struct dirent *ent;
+    char stack_buf[1024];
+    while ((ent = readdir(d)) != NULL) {
+        const char *name = ent->d_name;
+        if (name[0] == '.' && (name[1] == '\0' || (name[1] == '.' && name[2] == '\0'))) {
+            continue;
+        }
+        size_t name_len = strlen(name);
+        size_t full_len = dir_len + 1 + name_len + 1;
+        char *full = (full_len <= sizeof(stack_buf)) ? stack_buf : (char *)malloc(full_len);
+        if (!full) {
+            closedir(d);
+            return luaL_error(L, "out of memory in c_readdir");
+        }
+        memcpy(full, path, dir_len);
+        full[dir_len] = '/';
+        memcpy(full + dir_len + 1, name, name_len + 1);
+
+        struct stat st;
+        int is_dir = (lstat(full, &st) == 0 && S_ISDIR(st.st_mode)) ? 1 : 0;
+        if (full != stack_buf) free(full);
+
+        lua_newtable(L);
+        lua_pushlstring(L, name, name_len);
+        lua_setfield(L, -2, "name");
+        lua_pushboolean(L, is_dir);
+        lua_setfield(L, -2, "is_dir");
+        lua_rawseti(L, -2, idx++);
+    }
+    closedir(d);
+    return 1;
+}
+
+static int escape_impl(lua_State *L, int escape_quotes) {
+    size_t len = 0;
+    const char *s = luaL_checklstring(L, 1, &len);
+
+    size_t i = 0;
+    while (i < len) {
+        unsigned char c = (unsigned char)s[i];
+        if (c == '&' || c == '<' || c == '>' || (escape_quotes && c == '"')) {
+            break;
+        }
+        i++;
+    }
+    if (i == len) {
+        lua_pushvalue(L, 1);
+        return 1;
+    }
+
+    luaL_Buffer b;
+    luaL_buffinit(L, &b);
+    if (i > 0) {
+        luaL_addlstring(&b, s, i);
+    }
+
+    size_t span_start = i;
+    for (; i < len; i++) {
+        const char *rep = NULL;
+        size_t rep_len = 0;
+        switch (s[i]) {
+            case '&': rep = "&amp;";  rep_len = 5; break;
+            case '<': rep = "&lt;";   rep_len = 4; break;
+            case '>': rep = "&gt;";   rep_len = 4; break;
+            case '"':
+                if (escape_quotes) {
+                    rep = "&quot;";
+                    rep_len = 6;
+                }
+                break;
+            default: break;
+        }
+        if (rep) {
+            if (i > span_start) {
+                luaL_addlstring(&b, s + span_start, i - span_start);
+            }
+            luaL_addlstring(&b, rep, rep_len);
+            span_start = i + 1;
+        }
+    }
+    if (len > span_start) {
+        luaL_addlstring(&b, s + span_start, len - span_start);
+    }
+
+    luaL_pushresult(&b);
+    return 1;
+}
+
+static int l_c_html_escape(lua_State *L) {
+    return escape_impl(L, 0);
+}
+
+static int l_c_attr_escape(lua_State *L) {
+    return escape_impl(L, 1);
+}
+
+static void add_escaped_5(luaL_Buffer *b, const char *s, size_t len) {
+    size_t span_start = 0;
+    for (size_t i = 0; i < len; i++) {
+        const char *rep = NULL;
+        size_t rep_len = 0;
+        switch (s[i]) {
+            case '&':  rep = "&amp;";  rep_len = 5; break;
+            case '<':  rep = "&lt;";   rep_len = 4; break;
+            case '>':  rep = "&gt;";   rep_len = 4; break;
+            case '"':  rep = "&quot;"; rep_len = 6; break;
+            case '\'': rep = "&#39;";  rep_len = 5; break;
+            default: break;
+        }
+        if (rep) {
+            if (i > span_start) {
+                luaL_addlstring(b, s + span_start, i - span_start);
+            }
+            luaL_addlstring(b, rep, rep_len);
+            span_start = i + 1;
+        }
+    }
+    if (len > span_start) {
+        luaL_addlstring(b, s + span_start, len - span_start);
+    }
+}
+
+static void flush_token_run(lua_State *L, luaL_Buffer *b,
+                            const char *source, size_t run_start, size_t run_end,
+                            const char *run_type, size_t run_type_len,
+                            int has_class_map,
+                            const char *class_prefix, size_t class_prefix_len) {
+    if (run_type_len == 10 && memcmp(run_type, "whitespace", 10) == 0) {
+        add_escaped_5(b, source + run_start, run_end - run_start);
+        return;
+    }
+
+    luaL_addlstring(b, "<span class=\"", 13);
+    int emitted_from_map = 0;
+    if (has_class_map) {
+        char stack_tmp[256];
+        char *mapped_copy = NULL;
+        size_t mapped_len = 0;
+
+        lua_pushlstring(L, run_type, run_type_len);
+        lua_rawget(L, 3);
+        if (lua_type(L, -1) == LUA_TSTRING) {
+            const char *mapped = lua_tolstring(L, -1, &mapped_len);
+            if (mapped_len <= sizeof(stack_tmp)) {
+                memcpy(stack_tmp, mapped, mapped_len);
+                mapped_copy = stack_tmp;
+            } else {
+                mapped_copy = (char *)malloc(mapped_len);
+                if (mapped_copy) {
+                    memcpy(mapped_copy, mapped, mapped_len);
+                }
+            }
+            emitted_from_map = (mapped_copy != NULL);
+        }
+        lua_pop(L, 1);
+
+        if (emitted_from_map) {
+            luaL_addlstring(b, mapped_copy, mapped_len);
+            if (mapped_copy != stack_tmp) {
+                free(mapped_copy);
+            }
+        }
+    }
+    if (!emitted_from_map) {
+        add_escaped_5(b, class_prefix, class_prefix_len);
+        add_escaped_5(b, run_type, run_type_len);
+    }
+    luaL_addlstring(b, "\">", 2);
+    add_escaped_5(b, source + run_start, run_end - run_start);
+    luaL_addlstring(b, "</span>", 7);
+}
+
+static int l_c_tokens_to_html(lua_State *L) {
+    size_t source_len = 0;
+    const char *source = luaL_checklstring(L, 1, &source_len);
+    luaL_checktype(L, 2, LUA_TTABLE);
+    int has_class_map = lua_istable(L, 3);
+    size_t class_prefix_len = 0;
+    const char *class_prefix = luaL_optlstring(L, 4, "sh_", &class_prefix_len);
+    int bare = lua_toboolean(L, 5);
+
+    lua_Integer n = (lua_Integer)lua_rawlen(L, 2);
+
+    luaL_Buffer b;
+    luaL_buffinit(L, &b);
+
+    if (!bare) {
+        luaL_addlstring(&b, "<pre class=\"", 12);
+        add_escaped_5(&b, class_prefix, class_prefix_len);
+        luaL_addlstring(&b, "highlight\">", 11);
+    }
+
+    size_t position = 0;
+    const char *current_type = NULL;
+    size_t current_type_len = 0;
+
+    int has_run = 0;
+    const char *run_type = NULL;
+    size_t run_type_len = 0;
+    size_t run_start = 0;
+    size_t run_end = 0;
+
+    for (lua_Integer i = 1; i <= n; i++) {
+        int t = lua_rawgeti(L, 2, i);
+        if (t == LUA_TSTRING) {
+            current_type = lua_tolstring(L, -1, &current_type_len);
+            lua_pop(L, 1);
+        } else if (t == LUA_TNUMBER) {
+            lua_Integer tok_pos = lua_tointeger(L, -1);
+            lua_pop(L, 1);
+            if (!current_type) {
+                return luaL_error(L, "got position without type");
+            }
+            size_t tok_start = position;
+            size_t tok_end = (tok_pos > 1) ? (size_t)(tok_pos - 1) : 0;
+            if (tok_end > source_len) {
+                tok_end = source_len;
+            }
+            if (tok_end < tok_start) {
+                tok_end = tok_start;
+            }
+            position = tok_end;
+
+            if (has_run &&
+                run_type_len == current_type_len &&
+                memcmp(run_type, current_type, run_type_len) == 0 &&
+                tok_start == run_end) {
+                run_end = tok_end;
+            } else {
+                if (has_run) {
+                    flush_token_run(L, &b, source, run_start, run_end,
+                                    run_type, run_type_len,
+                                    has_class_map, class_prefix, class_prefix_len);
+                }
+                has_run = 1;
+                run_type = current_type;
+                run_type_len = current_type_len;
+                run_start = tok_start;
+                run_end = tok_end;
+            }
+        } else {
+            const char *tname = lua_typename(L, t);
+            lua_pop(L, 1);
+            return luaL_error(L, "unknown token type: %s", tname);
+        }
+    }
+
+    if (has_run) {
+        flush_token_run(L, &b, source, run_start, run_end,
+                        run_type, run_type_len,
+                        has_class_map, class_prefix, class_prefix_len);
+    }
+
+    if (!bare) {
+        luaL_addlstring(&b, "</pre>", 6);
+    }
+
+    luaL_pushresult(&b);
+    return 1;
+}
+
+static int l_c_cpu_count(lua_State *L) {
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    if (n < 1) n = 1;
+    lua_pushinteger(L, (lua_Integer)n);
+    return 1;
+}
+
+static int l_c_parallel_run(lua_State *L) {
+    lua_Integer count = luaL_checkinteger(L, 1);
+    luaL_checktype(L, 2, LUA_TFUNCTION);
+    lua_Integer max_workers = luaL_checkinteger(L, 3);
+
+    if (count <= 0) {
+        lua_pushboolean(L, 1);
+        return 1;
+    }
+    if (max_workers > count) {
+        max_workers = count;
+    }
+    if (max_workers <= 1) {
+        lua_pushvalue(L, 2);
+        lua_pushinteger(L, 1);
+        lua_pushinteger(L, 1);
+        if (lua_pcall(L, 2, 0, 0) != LUA_OK) {
+            return lua_error(L);
+        }
+        lua_pushboolean(L, 1);
+        return 1;
+    }
+
+    size_t nworkers = (size_t)max_workers;
+    pid_t *pids = (pid_t *)malloc(nworkers * sizeof(pid_t));
+    if (!pids) {
+        return luaL_error(L, "out of memory in c_parallel_run");
+    }
+
+    fflush(NULL);
+
+    size_t spawned = 0;
+    int spawn_err = 0;
+    for (size_t w = 0; w < nworkers; w++) {
+        pid_t pid = fork();
+        if (pid < 0) {
+            spawn_err = errno;
+            break;
+        }
+        if (pid == 0) {
+            /* Child worker: execute assigned slice and _exit immediately. */
+            lua_pushvalue(L, 2);
+            lua_pushinteger(L, (lua_Integer)(w + 1));
+            lua_pushinteger(L, (lua_Integer)nworkers);
+            if (lua_pcall(L, 2, 0, 0) != LUA_OK) {
+                fprintf(stderr, "git2html worker %zu: %s\n", w + 1, lua_tostring(L, -1));
+                fflush(stderr);
+                _exit(1);
+            }
+            fflush(NULL);
+            _exit(0);
+        }
+        pids[spawned++] = pid;
+    }
+
+    int failed = (spawn_err != 0);
+    for (size_t i = 0; i < spawned; i++) {
+        int status = 0;
+        pid_t r;
+        do {
+            r = waitpid(pids[i], &status, 0);
+        } while (r < 0 && errno == EINTR);
+        if (r < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+            failed = 1;
+        }
+    }
+    free(pids);
+
+    if (failed) {
+        lua_pushboolean(L, 0);
+        if (spawn_err != 0) {
+            lua_pushfstring(L, "fork failed: %s", strerror(spawn_err));
+        } else {
+            lua_pushstring(L, "one or more render workers failed");
+        }
+        return 2;
+    }
+
+    lua_pushboolean(L, 1);
     return 1;
 }
 
@@ -92,6 +527,16 @@ int main(int argc, char **argv) {
     }
     luaL_openlibs(L);
     lua_register(L, "c_is_newer", l_c_is_newer);
+    lua_register(L, "c_monotonic_time", l_c_monotonic_time);
+    lua_register(L, "c_mkdir_p", l_c_mkdir_p);
+    lua_register(L, "c_is_dir", l_c_is_dir);
+    lua_register(L, "c_file_exists", l_c_file_exists);
+    lua_register(L, "c_readdir", l_c_readdir);
+    lua_register(L, "c_html_escape", l_c_html_escape);
+    lua_register(L, "c_attr_escape", l_c_attr_escape);
+    lua_register(L, "c_tokens_to_html", l_c_tokens_to_html);
+    lua_register(L, "c_cpu_count", l_c_cpu_count);
+    lua_register(L, "c_parallel_run", l_c_parallel_run);
 
     luaL_requiref(L, "lpeg", luaopen_lpeg, 0);
     lua_pop(L, 1);

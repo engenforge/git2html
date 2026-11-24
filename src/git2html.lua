@@ -31,6 +31,33 @@ local clone_url_base = nil
 -- the releases line at all.
 local release_url_base = nil
 local has_multiple_repos = false
+
+local prof_enabled = os.getenv("GIT2HTML_PROFILE") ~= nil and os.getenv("GIT2HTML_PROFILE") ~= ""
+local prof_totals = {}
+local prof_counts = {}
+local function prof_now()
+    if _G.c_monotonic_time then
+        return _G.c_monotonic_time()
+    end
+    return os.clock()
+end
+local function prof_add(name, dt)
+    prof_totals[name] = (prof_totals[name] or 0) + dt
+    prof_counts[name] = (prof_counts[name] or 0) + 1
+end
+local function prof_report(total_dt)
+    if not prof_enabled then return end
+    local keys = {}
+    for k in pairs(prof_totals) do keys[#keys + 1] = k end
+    table.sort(keys, function(a, b) return prof_totals[a] > prof_totals[b] end)
+    io.stderr:write(string.format("\n=== git2html profile (total: %.4fs) ===\n", total_dt))
+    for _, k in ipairs(keys) do
+        local t = prof_totals[k]
+        local pct = total_dt > 0 and (t / total_dt * 100) or 0
+        io.stderr:write(string.format("  %-24s %8.4fs (%5.1f%%) [%d calls]\n", k, t, pct, prof_counts[k]))
+    end
+end
+
 local function log(msg)
     if verbose then print(msg) end
 end
@@ -125,11 +152,20 @@ local lang_map = {
     adb = "ada", ads = "ada",
 }
 
+local c_html_escape = _G.c_html_escape
+local c_attr_escape = _G.c_attr_escape
+
 local function html_escape(s)
+    if c_html_escape then
+        return c_html_escape(s)
+    end
     return (s:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
 end
 
 local function attr_escape(s)
+    if c_attr_escape then
+        return c_attr_escape(s)
+    end
     return html_escape(s):gsub('"', "&quot;")
 end
 
@@ -233,14 +269,16 @@ local function format_description(desc)
 end
 
 local function hl_to_html(code, lang)
+    local t0 = prof_enabled and prof_now()
     if not lang then lang = "text" end
     lang = lang_map[lang] or lang
     -- The "hl-" prefix is the shared theme contract: the same class names the
     -- luasmith site templates emit, so one stylesheet colors both.
     local html, err = sh.highlight_to_html(lang, code, { bare = true, class_prefix = "hl-" })
     if not html then
-        return html_escape(code)
+        html = html_escape(code)
     end
+    if t0 then prof_add("hl_to_html", prof_now() - t0) end
     return html
 end
 
@@ -339,11 +377,14 @@ local md_parse = lunamark.reader.markdown.new(md_writer, {
     escaped_line_breaks = true,
 })
 
+local md_warmed_up = false
+
 local function md_render(content, initial_prev)
     -- Without a trailing blank line, lunamark's last block loses its <p>
     -- wrapper -- every README.md read from disk ends in a single newline
     -- at most, so this would otherwise strip the tag from every README's
     -- final paragraph.
+    md_warmed_up = true
     local html = md_parse(content:gsub("%s*$", "") .. "\n\n")
     return normalize_headings(html, initial_prev)
 end
@@ -405,17 +446,41 @@ local function frontmatter_html(lines)
 end
 
 local function md(content, initial_prev)
+    local t0 = prof_enabled and prof_now()
     local fm_lines, body = split_frontmatter(content)
+    local res
     if fm_lines then
         local html = frontmatter_html(fm_lines)
-        return html .. (body:match("%S") and md_render(body, initial_prev) or "")
+        res = html .. (body:match("%S") and md_render(body, initial_prev) or "")
+    else
+        res = md_render(content, initial_prev)
     end
-    return md_render(content, initial_prev)
+    if t0 then prof_add("md_render", prof_now() - t0) end
+    return res
 end
 
 
 local function sh_quote(s)
     return "'" .. s:gsub("'", "'\\''") .. "'"
+end
+
+local function is_dir(path)
+    if _G.c_is_dir then
+        return _G.c_is_dir(path)
+    end
+    return exec_ok("test -d " .. sh_quote(path))
+end
+
+local function mkdir_p(dir)
+    local t0 = prof_enabled and prof_now()
+    local ok
+    if _G.c_mkdir_p then
+        ok = _G.c_mkdir_p(dir)
+    else
+        ok = os.execute("mkdir -p " .. sh_quote(dir))
+    end
+    if t0 then prof_add("mkdir_p", prof_now() - t0) end
+    return ok
 end
 
 -- Rewrites relative links inside rendered markdown to the pages this tool
@@ -440,7 +505,7 @@ local function rewrite_md_links(html, source_dir)
         if target:match("/$") then
             target = target .. "index.html"
         elseif target == "." or target == ".." or target:match("/%.%.?$")
-            or (source_dir and exec_ok("test -d " .. sh_quote(source_dir .. "/" .. target))) then
+            or (source_dir and is_dir(source_dir .. "/" .. target)) then
             target = target .. "/index.html"
         else
             target = target .. ".html"
@@ -461,11 +526,17 @@ end
 -- published: an image referenced from a README had nothing to point at and no
 -- binary asset could be downloaded at all.
 local function is_binary(path)
+    local t0 = prof_enabled and prof_now()
     local f = io.open(path, "rb")
-    if not f then return false end
+    if not f then
+        if t0 then prof_add("is_binary", prof_now() - t0) end
+        return false
+    end
     local chunk = f:read(8000) or ""
     f:close()
-    return chunk:find("\0", 1, true) ~= nil
+    local res = chunk:find("\0", 1, true) ~= nil
+    if t0 then prof_add("is_binary", prof_now() - t0) end
+    return res
 end
 
 local function normalize_path(p)
@@ -477,6 +548,9 @@ local function normalize_path(p)
 end
 
 local function file_exists(path)
+    if _G.c_file_exists then
+        return _G.c_file_exists(path)
+    end
     local f = io.open(path, "rb")
     if f then
         f:close()
@@ -486,10 +560,15 @@ local function file_exists(path)
 end
 
 local function is_newer(target, source)
+    local t0 = prof_enabled and prof_now()
+    local res
     if _G.c_is_newer then
-        return _G.c_is_newer(target, source)
+        res = _G.c_is_newer(target, source)
+    else
+        res = exec_ok("test -f " .. sh_quote(target) .. " && test -e " .. sh_quote(source) .. " && test " .. sh_quote(target) .. " -nt " .. sh_quote(source))
     end
-    return exec_ok("test -f " .. sh_quote(target) .. " && test -e " .. sh_quote(source) .. " && test " .. sh_quote(target) .. " -nt " .. sh_quote(source))
+    if t0 then prof_add("is_newer", prof_now() - t0) end
+    return res
 end
 
 local expected_files = {}
@@ -546,11 +625,19 @@ local function clean_destination_tree(output_root)
 end
 
 local function copy_file(src, dest)
+    local t0 = prof_enabled and prof_now()
     register_expected_file(dest)
     local i = io.open(src, "rb")
-    if not i then return false end
+    if not i then
+        if t0 then prof_add("copy_file", prof_now() - t0) end
+        return false
+    end
     local o = io.open(dest, "wb")
-    if not o then i:close() return false end
+    if not o then
+        i:close()
+        if t0 then prof_add("copy_file", prof_now() - t0) end
+        return false
+    end
     while true do
         local block = i:read(64 * 1024)
         if not block then break end
@@ -558,6 +645,7 @@ local function copy_file(src, dest)
     end
     i:close()
     o:close()
+    if t0 then prof_add("copy_file", prof_now() - t0) end
     return true
 end
 
@@ -568,23 +656,34 @@ local function human_size(bytes)
 end
 
 local function read_file(path)
+    local t0 = prof_enabled and prof_now()
     local f = io.open(path, "r")
-    if not f then return nil end
+    if not f then
+        if t0 then prof_add("read_file", prof_now() - t0) end
+        return nil
+    end
     local content = f:read("*all")
     f:close()
+    if t0 then prof_add("read_file", prof_now() - t0) end
     return content
 end
 
 local function write_file(path, content)
+    local t0 = prof_enabled and prof_now()
     register_expected_file(path)
     local existing = read_file(path)
     if existing == content then
+        if t0 then prof_add("write_file", prof_now() - t0) end
         return true
     end
     local f = io.open(path, "w")
-    if not f then return false end
+    if not f then
+        if t0 then prof_add("write_file", prof_now() - t0) end
+        return false
+    end
     f:write(content)
     f:close()
+    if t0 then prof_add("write_file", prof_now() - t0) end
     return true
 end
 
@@ -777,7 +876,7 @@ local function generate_parent_indexes(output_root, header_parts, theme)
             local rel_output = table.concat(parts, "/")
             local target_output = output_root .. (rel_output == "" and "" or "/" .. rel_output)
             register_expected_dir(target_output)
-            os.execute("mkdir -p " .. sh_quote(target_output))
+            mkdir_p(target_output)
             local rel_to_root = ""
             for _ = 1, i do rel_to_root = rel_to_root .. "../" end
             
@@ -824,10 +923,169 @@ local function repo_template(header_parts, page_title, content, rel_path)
     return page_shell(page_title, rel_path, nav_html, content)
 end
 
-local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, metadata)
+local function stamp_hash(s)
+    local h = 0xcbf29ce484222325
+    for i = 1, #s do
+        h = (h ~ s:byte(i)) * 0x100000001b3
+    end
+    return string.format("%016x", h)
+end
+
+local function file_has_stamp(path, expected_comment)
+    local f = io.open(path, "rb")
+    if not f then return false end
+    local size = f:seek("end")
+    if not size or size < #expected_comment then
+        f:close()
+        return false
+    end
+    local read_len = math.min(size, #expected_comment + 16)
+    f:seek("end", -read_len)
+    local tail = f:read(read_len) or ""
+    f:close()
+    return tail:find(expected_comment, 1, true) ~= nil
+end
+
+local README_NAMES = { "README.md", "README.markdown", "readme.md", "README.MD" }
+local function find_readme_path(repo_path)
+    for _, name in ipairs(README_NAMES) do
+        local p = repo_path .. "/" .. name
+        if file_exists(p) then
+            return p
+        end
+    end
+    return nil
+end
+
+local render_jobs = {}
+
+local function execute_render_job(job)
+    if job.kind == "binary_copy" then
+        copy_file(job.source, job.target)
+    elseif job.kind == "binary_html" then
+        local name = job.name
+        local ext = name:match("%.([^%.]+)$")
+        local ext_lower = ext and ext:lower()
+        local file_breadcrumbs = { raw(job.breadcrumbs), " / ", name }
+        local body
+
+        if ext_lower == "png" or ext_lower == "jpg" or ext_lower == "jpeg" then
+            body = el("h2", nil, file_breadcrumbs) .. CI
+                .. el("p", nil, raw(el("img", { { "src", name }, { "alt", name } })))
+        elseif is_markdown_file(name) then
+            local content = read_file(job.source) or ""
+            local html_content = el("div", { class = "readme" }, raw(rewrite_md_links(md(content, 2), job.source_dir)))
+            body = el("h2", nil, file_breadcrumbs) .. CI .. html_content
+        elseif ext_lower == "txt" or ext_lower == "text" then
+            local content = read_file(job.source) or ""
+            local html_content = el("pre", { tabindex = "0" }, raw(el("code", nil, raw(hl_to_html(content, "text")))))
+            body = el("h2", nil, file_breadcrumbs) .. CI .. html_content
+        else
+            local size = 0
+            local probe = io.open(job.source, "rb")
+            if probe then size = probe:seek("end") probe:close() end
+
+            body = el("h2", nil, file_breadcrumbs) .. CI
+                .. el("p", { class = "meta" }, "Binary file, " .. human_size(size) .. ".") .. CI
+                .. el("p", nil, raw(el("a", { href = name }, "Download " .. name)))
+        end
+
+        write_file(job.target,
+            repo_template(job.header_parts, job.display_name .. " - " .. job.rel_path,
+                body, job.rel_to_root))
+    elseif job.kind == "text" then
+        local content = read_file(job.source)
+        if not content then return end
+        local name = job.name
+        local html_content
+        if is_markdown_file(name) then
+            html_content = el("div", { class = "readme" }, raw(rewrite_md_links(md(content, 2), job.source_dir)))
+        else
+            local extension = name:match("%.([^%.]+)$")
+            local lang = extension and extension:lower()
+            if not lang then
+                if name:lower() == "makefile" then lang = "makefile"
+                elseif name:lower() == "dockerfile" then lang = "dockerfile"
+                end
+            end
+            -- overflow-x on pre makes a wide block a scrollable region,
+            -- and a scrollable region that cannot be focused cannot be
+            -- scrolled without a pointer. tabindex="0" puts it in the
+            -- tab order, which is what spec section 5.1 admits the
+            -- attribute for.
+            html_content = el("pre", { tabindex = "0" }, raw(el("code", nil, raw(hl_to_html(content, lang)))))
+        end
+
+        local file_breadcrumbs = { raw(job.breadcrumbs), " / ", name }
+        write_file(job.target,
+            repo_template(job.header_parts, job.display_name .. " - " .. job.rel_path,
+                el("h2", nil, file_breadcrumbs) .. CI .. html_content, job.rel_to_root))
+    end
+end
+
+local function get_worker_count(job_count)
+    if job_count < 4 then return 1 end
+    local env_jobs = os.getenv("GIT2HTML_JOBS")
+    if env_jobs then
+        local n = tonumber(env_jobs)
+        if n and n >= 1 then
+            return math.min(math.floor(n), job_count)
+        end
+    end
+    local cpus = _G.c_cpu_count and _G.c_cpu_count() or 1
+    if cpus < 2 then return 1 end
+    return math.min(cpus, 16, math.ceil(job_count / 2))
+end
+
+local function flush_render_jobs()
+    local n = #render_jobs
+    if n == 0 then return end
+    local jobs = render_jobs
+    render_jobs = {}
+
+    local workers = _G.c_parallel_run and get_worker_count(n) or 1
+    if workers > 1 then
+        if not md_warmed_up then
+            for i = 1, n do
+                local j = jobs[i]
+                if j.name and is_markdown_file(j.name) then
+                    md_render("\n\n")
+                    break
+                end
+            end
+        end
+        local t_par = prof_enabled and prof_now()
+        local ok, err = _G.c_parallel_run(n, function(worker_id, num_workers)
+            for idx = worker_id, n, num_workers do
+                execute_render_job(jobs[idx])
+            end
+        end, workers)
+        if t_par then prof_add("parallel_render", prof_now() - t_par) end
+        if not ok then
+            io.stderr:write("Error: " .. tostring(err) .. "\n")
+            os.exit(1)
+        end
+    else
+        for idx = 1, n do
+            execute_render_job(jobs[idx])
+        end
+    end
+end
+
+local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, metadata, tree, skip_index, index_comment)
     subdir = subdir or ""
     progress("  Walking tree: " .. (subdir == "" and "[root]" or subdir))
-    local files = git.ls_files(repo_path, subdir, metadata)
+    local files
+    if skip_index and tree then
+        local key = subdir:gsub("^/+", ""):gsub("/+$", "")
+        local raw_entries = tree.dirs[key] or {}
+        files = {}
+        for i = 1, #raw_entries do files[i] = raw_entries[i] end
+    else
+        local t_ls = prof_enabled and prof_now()
+        files = git.ls_files(repo_path, subdir, metadata, tree)
+        if t_ls then prof_add("git.ls_files", prof_now() - t_ls) end
+    end
     
     table.sort(files, function(a, b)
         if a.is_dir ~= b.is_dir then return a.is_dir end
@@ -840,34 +1098,57 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
     for part in subdir:gmatch("[^/]+") do table.insert(parts, part) end
     for i = 1, #parts do rel_to_root = rel_to_root .. "../" end
 
-    local breadcrumb_parts = { display_name }
-    for _, part in ipairs(parts) do table.insert(breadcrumb_parts, part) end
-    local breadcrumbs = breadcrumb_trail(breadcrumb_parts)
+    local breadcrumbs
+    local function get_breadcrumbs()
+        if not breadcrumbs then
+            local breadcrumb_parts = { display_name }
+            for _, part in ipairs(parts) do table.insert(breadcrumb_parts, part) end
+            breadcrumbs = breadcrumb_trail(breadcrumb_parts)
+        end
+        return breadcrumbs
+    end
 
-    local rows = ""
-    if subdir ~= "" then
-        rows = rows .. RI .. listing_row("../index.html", "..")
+    local rows
+    if not skip_index then
+        rows = {}
+        if subdir ~= "" then
+            rows[#rows + 1] = RI .. listing_row("../index.html", "..")
+        end
     end
 
     for _, f in ipairs(files) do
         local name = f.path:match("([^/]+)$") or f.path
-        local desc_td = format_description(f.description)
         if f.is_dir then
-            rows = rows .. RI .. listing_row(name .. "/index.html", name .. "/", desc_td, f.last_changed)
+            if not skip_index then
+                local desc_td = format_description(f.description)
+                rows[#rows + 1] = RI .. listing_row(name .. "/index.html", name .. "/", desc_td, f.last_changed)
+            end
             register_expected_dir(output_dir .. "/" .. f.path)
-            os.execute("mkdir -p " .. sh_quote(output_dir .. "/" .. f.path))
-            generate_repo_tree(repo_path, output_dir, header_parts, f.path, metadata)
+            mkdir_p(output_dir .. "/" .. f.path)
+            generate_repo_tree(repo_path, output_dir, header_parts, f.path, metadata, tree, skip_index, index_comment)
         else
-            local file_view_path = name .. ".html"
-            rows = rows .. RI .. listing_row(file_view_path, name, desc_td, f.last_changed)
+            if not skip_index then
+                local desc_td = format_description(f.description)
+                local file_view_path = name .. ".html"
+                rows[#rows + 1] = RI .. listing_row(file_view_path, name, desc_td, f.last_changed)
+            end
             
             local source = repo_path .. "/" .. f.path
+            local binary_target = output_dir .. "/" .. f.path
+            local html_target = output_dir .. "/" .. f.path .. ".html"
+            local html_is_newer = is_newer(html_target, source)
 
-            if is_binary(source) then
+            if html_is_newer and is_newer(binary_target, source) then
+                register_expected_file(binary_target)
+                register_expected_file(html_target)
+                log("    Skipping: " .. f.path)
+                log("    Skipping: " .. f.path .. ".html")
+            elseif html_is_newer and not file_exists(binary_target) then
+                register_expected_file(html_target)
+                log("    Skipping: " .. f.path)
+            elseif is_binary(source) then
                 -- Published verbatim, with a landing page describing it, so a
                 -- reader can download it and a README can link to it.
-                local binary_target = output_dir .. "/" .. f.path
-                local html_target = output_dir .. "/" .. f.path .. ".html"
                 register_expected_file(binary_target)
                 register_expected_file(html_target)
 
@@ -875,134 +1156,160 @@ local function generate_repo_tree(repo_path, output_dir, header_parts, subdir, m
                     log("    Skipping: " .. f.path)
                 else
                     log("    Copying: " .. f.path)
-                    copy_file(source, binary_target)
+                    render_jobs[#render_jobs + 1] = {
+                        kind = "binary_copy",
+                        source = source,
+                        target = binary_target,
+                    }
                 end
 
-                if is_newer(html_target, source) then
+                if html_is_newer then
                     log("    Skipping: " .. f.path .. ".html")
                 else
-                    local ext = name:match("%.([^%.]+)$")
-                    local ext_lower = ext and ext:lower()
-                    local file_breadcrumbs = { raw(breadcrumbs), " / ", name }
-                    local body
-
-                    if ext_lower == "png" or ext_lower == "jpg" or ext_lower == "jpeg" then
-                        body = el("h2", nil, file_breadcrumbs) .. CI
-                            .. el("p", nil, raw(el("img", { { "src", name }, { "alt", name } })))
-                    elseif is_markdown_file(name) then
-                        local content = read_file(source) or ""
-                        local source_dir = repo_path .. (subdir == "" and "" or "/" .. subdir)
-                        local html_content = el("div", { class = "readme" }, raw(rewrite_md_links(md(content, 2), source_dir)))
-                        body = el("h2", nil, file_breadcrumbs) .. CI .. html_content
-                    elseif ext_lower == "txt" or ext_lower == "text" then
-                        local content = read_file(source) or ""
-                        local html_content = el("pre", { tabindex = "0" }, raw(el("code", nil, raw(hl_to_html(content, "text")))))
-                        body = el("h2", nil, file_breadcrumbs) .. CI .. html_content
-                    else
-                        local size = 0
-                        local probe = io.open(source, "rb")
-                        if probe then size = probe:seek("end") probe:close() end
-
-                        body = el("h2", nil, file_breadcrumbs) .. CI
-                            .. el("p", { class = "meta" }, "Binary file, " .. human_size(size) .. ".") .. CI
-                            .. el("p", nil, raw(el("a", { href = name }, "Download " .. name)))
-                    end
-
-                    write_file(html_target,
-                        repo_template(header_parts, display_name .. " - " .. f.path,
-                            body, rel_to_root))
+                    render_jobs[#render_jobs + 1] = {
+                        kind = "binary_html",
+                        source = source,
+                        target = html_target,
+                        name = name,
+                        rel_path = f.path,
+                        breadcrumbs = get_breadcrumbs(),
+                        source_dir = repo_path .. (subdir == "" and "" or "/" .. subdir),
+                        header_parts = header_parts,
+                        display_name = display_name,
+                        rel_to_root = rel_to_root,
+                    }
                 end
             else
-                local html_target = output_dir .. "/" .. f.path .. ".html"
                 register_expected_file(html_target)
 
-                if is_newer(html_target, source) then
+                if html_is_newer then
                     log("    Skipping: " .. f.path)
-                else
-                    local content = read_file(source)
-                    if content then
-                        log("    Rendering: " .. f.path)
-                        local is_markdown = is_markdown_file(name)
-                        local html_content
-                        if is_markdown then
-                            local source_dir = repo_path .. (subdir == "" and "" or "/" .. subdir)
-                            html_content = el("div", { class = "readme" }, raw(rewrite_md_links(md(content, 2), source_dir)))
-                        else
-                            local extension = name:match("%.([^%.]+)$")
-                            local lang = extension and extension:lower()
-                            if not lang then
-                                if name:lower() == "makefile" then lang = "makefile"
-                                elseif name:lower() == "dockerfile" then lang = "dockerfile"
-                                end
-                            end
-                            -- overflow-x on pre makes a wide block a scrollable region,
-                            -- and a scrollable region that cannot be focused cannot be
-                            -- scrolled without a pointer. tabindex="0" puts it in the
-                            -- tab order, which is what spec section 5.1 admits the
-                            -- attribute for.
-                            html_content = el("pre", { tabindex = "0" }, raw(el("code", nil, raw(hl_to_html(content, lang)))))
-                        end
-
-                        local file_breadcrumbs = { raw(breadcrumbs), " / ", name }
-                        write_file(html_target, repo_template(header_parts, display_name .. " - " .. f.path, el("h2", nil, file_breadcrumbs) .. CI .. html_content, rel_to_root))
-                    end
+                elseif file_exists(source) then
+                    log("    Rendering: " .. f.path)
+                    render_jobs[#render_jobs + 1] = {
+                        kind = "text",
+                        source = source,
+                        target = html_target,
+                        name = name,
+                        rel_path = f.path,
+                        breadcrumbs = get_breadcrumbs(),
+                        source_dir = repo_path .. (subdir == "" and "" or "/" .. subdir),
+                        header_parts = header_parts,
+                        display_name = display_name,
+                        rel_to_root = rel_to_root,
+                    }
                 end
             end
         end
     end
 
-    -- At the repo root, breadcrumbs is just a link back to this same page
-    -- with the repo's own name -- already shown in the nav bar, so
-    -- repeating it here would be the same redundant-title problem the nav
-    -- redesign fixed. A subdirectory's breadcrumbs carries real extra path
-    -- information the nav doesn't carry, so it stays.
-    local index_content = subdir == "" and "" or (el("h2", nil, raw(breadcrumbs)) .. CI)
-    local is_main_landing = (subdir == "")
-    if is_main_landing then
-        index_content = index_content .. clone_line(header_parts)
-        index_content = index_content .. release_line(header_parts)
-    end
-    index_content = index_content .. files_table(rows, is_main_landing)
-    if is_main_landing then
-        local readme = read_file(repo_path .. "/README.md")
-            or read_file(repo_path .. "/README.markdown")
-            or read_file(repo_path .. "/readme.md")
-            or read_file(repo_path .. "/README.MD")
-        if readme then
-            index_content = index_content .. CI .. el("div", { class = "readme" }, raw(rewrite_md_links(md(readme), repo_path)))
-        end
-    end
-
     local target_path = output_dir .. "/" .. (subdir == "" and "" or subdir .. "/") .. "index.html"
-    write_file(target_path, repo_template(header_parts, display_name .. (subdir == "" and "" or " - " .. subdir), index_content, rel_to_root))
+    if skip_index then
+        register_expected_file(target_path)
+        log("    Skipping: " .. (subdir == "" and "index.html" or subdir .. "/index.html"))
+    else
+        -- At the repo root, breadcrumbs is just a link back to this same page
+        -- with the repo's own name -- already shown in the nav bar, so
+        -- repeating it here would be the same redundant-title problem the nav
+        -- redesign fixed. A subdirectory's breadcrumbs carries real extra path
+        -- information the nav doesn't carry, so it stays.
+        local index_content = subdir == "" and "" or (el("h2", nil, raw(get_breadcrumbs())) .. CI)
+        local is_main_landing = (subdir == "")
+        if is_main_landing then
+            index_content = index_content .. clone_line(header_parts)
+            index_content = index_content .. release_line(header_parts)
+        end
+        index_content = index_content .. files_table(table.concat(rows), is_main_landing)
+        if is_main_landing then
+            local readme_path = find_readme_path(repo_path)
+            local readme = readme_path and read_file(readme_path)
+            if readme then
+                index_content = index_content .. CI .. el("div", { class = "readme" }, raw(rewrite_md_links(md(readme), repo_path)))
+            end
+        end
+
+        write_file(target_path, repo_template(header_parts, display_name .. (subdir == "" and "" or " - " .. subdir), index_content, rel_to_root) .. (index_comment or ""))
+    end
 end
 
 local function generate_repo_site(repo_path, target_output, header_parts, theme, output_root)
     progress("Processing repository: " .. table.concat(header_parts, " / "))
     register_expected_dir(target_output)
-    os.execute("mkdir -p " .. sh_quote(target_output))
+    mkdir_p(target_output)
 
     install_theme(theme, target_output .. "/style.css")
 
     generate_parent_indexes(output_root, header_parts, theme)
-    
+
+    local head_hash = git.get_head(repo_path)
+    local header_html = get_header()
+    local footer_html = get_footer()
+    local repo_key = table.concat(header_parts, "/")
+
     -- Repo Log
-    local log_data = git.get_log(repo_path)
-    local log_rows = ""
-    for _, c in ipairs(log_data) do
-        log_rows = log_rows .. RI .. el("tr", nil, {
-            raw(el("td", nil, c.hash)),
-            raw(el("td", nil, c.date)),
-            raw(el("td", nil, c.subject)),
-            raw(el("td", nil, c.author)),
-        })
+    local log_target = target_output .. "/log.html"
+    local log_comment = head_hash and ("<!-- git2html-stamp: " .. head_hash .. ":" .. stamp_hash(table.concat({
+        "log", site_lang, tostring(has_multiple_repos), repo_key, generation_date or "", header_html, footer_html
+    }, "\0")) .. " -->\n") or nil
+
+    if log_comment and file_has_stamp(log_target, log_comment) then
+        register_expected_file(log_target)
+        log("    Skipping: log.html")
+    else
+        local t_log = prof_enabled and prof_now()
+        local log_data = git.get_log(repo_path)
+        if t_log then prof_add("git.get_log", prof_now() - t_log) end
+        local t_log_html = prof_enabled and prof_now()
+        local log_rows = {}
+        for _, c in ipairs(log_data) do
+            log_rows[#log_rows + 1] = RI .. el("tr", nil, {
+                raw(el("td", nil, c.hash)),
+                raw(el("td", nil, c.date)),
+                raw(el("td", nil, c.subject)),
+                raw(el("td", nil, c.author)),
+            })
+        end
+        local log_html = log_table(table.concat(log_rows))
+        local log_page = repo_template(header_parts, header_parts[#header_parts] .. " - Log", log_html)
+        if t_log_html then prof_add("log.html_render", prof_now() - t_log_html) end
+        write_file(log_target, log_page .. (log_comment or ""))
     end
-    local log_html = log_table(log_rows)
-    write_file(target_output .. "/log.html", repo_template(header_parts, header_parts[#header_parts] .. " - Log", log_html))
     
     -- Recursive Tree
-    local metadata = git.get_bulk_metadata(repo_path)
-    generate_repo_tree(repo_path, target_output, header_parts, "", metadata)
+    local t_tree = prof_enabled and prof_now()
+    local tree = git.ls_tree(repo_path)
+    if t_tree then prof_add("git.ls_tree", prof_now() - t_tree) end
+
+    local index_comment = head_hash and ("<!-- git2html-stamp: " .. head_hash .. ":" .. stamp_hash(table.concat({
+        "index", site_lang, tostring(has_multiple_repos), repo_key, generation_date or "",
+        clone_url_base or "", release_url_base or "", header_html, footer_html
+    }, "\0")) .. " -->\n") or nil
+
+    local all_indexes_fresh = false
+    if index_comment then
+        all_indexes_fresh = true
+        local readme_path = find_readme_path(repo_path)
+        if readme_path and not is_newer(target_output .. "/index.html", readme_path) then
+            all_indexes_fresh = false
+        end
+        if all_indexes_fresh then
+            for dir_key in pairs(tree.dirs) do
+                local idx_path = target_output .. "/" .. (dir_key == "" and "" or dir_key .. "/") .. "index.html"
+                if not file_has_stamp(idx_path, index_comment) then
+                    all_indexes_fresh = false
+                    break
+                end
+            end
+        end
+    end
+
+    local metadata = nil
+    if not all_indexes_fresh then
+        local t_meta = prof_enabled and prof_now()
+        metadata = git.get_bulk_metadata(repo_path, tree.files, tree.file_count)
+        if t_meta then prof_add("git.get_bulk_metadata", prof_now() - t_meta) end
+    end
+    generate_repo_tree(repo_path, target_output, header_parts, "", metadata, tree, all_indexes_fresh, index_comment)
 end
 
 local function count_direct_repos(dir, strip)
@@ -1076,9 +1383,9 @@ local function walk_and_process(current_path, output_root, strip_path, theme)
             local rel_to_root = ""
             for i = 1, #header_parts do rel_to_root = rel_to_root .. "../" end
 
-            local rows = ""
+            local rows = {}
             if #header_parts > 0 then
-                rows = rows .. RI .. listing_row("../index.html", "..")
+                rows[#rows + 1] = RI .. listing_row("../index.html", "..")
             end
 
             table.sort(children, function(a, b) return a.name < b.name end)
@@ -1087,13 +1394,13 @@ local function walk_and_process(current_path, output_root, strip_path, theme)
                 local link = child.rel .. "/index.html"
                 local suffix = (child.type == "dir" and "/" or "")
                 local desc_td = format_description(child.description)
-                rows = rows .. RI .. listing_row(link, child.name .. suffix, desc_td, child.age or "-")
+                rows[#rows + 1] = RI .. listing_row(link, child.name .. suffix, desc_td, child.age or "-")
             end
 
             -- Same nav-only-at-root rule as generate_parent_indexes: skip
             -- the breadcrumb where it would just repeat "Repositories".
             local index_content = #header_parts == 0 and "" or (el("h2", nil, raw(breadcrumb_trail(header_parts))) .. CI)
-            index_content = index_content .. files_table(rows, false)
+            index_content = index_content .. files_table(table.concat(rows), false)
             local page_title = (#header_parts == 0 and "Repositories" or table.concat(header_parts, " / "))
             -- Only created once we know this directory (or a descendant)
             -- actually has something to show -- otherwise every non-repo
@@ -1101,7 +1408,7 @@ local function walk_and_process(current_path, output_root, strip_path, theme)
             -- as an empty directory.
             if #header_parts > 0 or has_multiple_repos then
                 register_expected_dir(target_output)
-                os.execute("mkdir -p " .. sh_quote(target_output))
+                mkdir_p(target_output)
                 write_file(target_output .. "/index.html", template(page_title, index_content, rel_to_root))
             end
 
@@ -1147,6 +1454,7 @@ local function get_version()
 end
 
 local function main(raw_args)
+    local t_main = prof_enabled and prof_now()
     local args = {}
     local theme_flag = nil
     local clean_dest = false
@@ -1240,7 +1548,7 @@ local function main(raw_args)
 
     if git.is_url(repo_input) then
         local temp_dir = "/tmp/git2html-" .. os.time()
-        os.execute("mkdir -p " .. temp_dir)
+        mkdir_p(temp_dir)
         log("Cloning remote repository: " .. repo_input)
         local repo_path, is_temp = git.prepare_repo(repo_input, temp_dir)
         if not repo_path then
@@ -1255,17 +1563,18 @@ local function main(raw_args)
         if header_file then log("Using custom header from: " .. header_file) end
 
         -- One style sheet at the output root, linked relatively from every page.
-        os.execute("mkdir -p " .. output_dir)
+        mkdir_p(output_dir)
         install_theme(theme, output_dir .. "/style.css")
 
         local display_name = repo_input:match("([^/]+)$"):gsub("%.git$", "")
         generate_repo_site(repo_path, output_dir .. "/" .. display_name, {display_name}, theme, output_dir)
         generate_parent_indexes(output_dir, {display_name}, theme)
+        flush_render_jobs()
         if is_temp then os.execute("rm -rf " .. temp_dir) end
     else
         -- Local path: check that path exists and is a directory
-        local is_dir = exec_ok(string.format("test -d %q", repo_input))
-        if not is_dir then
+        local is_repo_dir = is_dir(repo_input)
+        if not is_repo_dir then
             print("Error: Not a git repository: " .. repo_input)
             os.exit(1)
         end
@@ -1278,7 +1587,7 @@ local function main(raw_args)
             if header_file then log("Using custom header from: " .. header_file) end
 
             -- One style sheet at the output root, linked relatively from every page.
-            os.execute("mkdir -p " .. output_dir)
+            mkdir_p(output_dir)
             install_theme(theme, output_dir .. "/style.css")
 
             local escaped = strip_input:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0")
@@ -1316,16 +1625,19 @@ local function main(raw_args)
             end
 
             -- One style sheet at the output root, linked relatively from every page.
-            os.execute("mkdir -p " .. output_dir)
+            mkdir_p(output_dir)
             install_theme(theme, output_dir .. "/style.css")
         end
     end
     
+    flush_render_jobs()
+
     if clean_dest then
         clean_destination_tree(output_dir)
     end
 
     progress("Done! Static site generated in " .. output_dir)
+    if t_main then prof_report(prof_now() - t_main) end
 end
 
 main({...})

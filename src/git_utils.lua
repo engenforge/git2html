@@ -15,8 +15,15 @@ git.exec_ok = exec_ok
 function git.is_repo(path)
     -- A repository root must contain a .git directory or be a bare repo
     -- We'll check for .git (directory or file for submodules)
-    local cmd = string.format("test -d %q/.git || test -f %q/.git", path, path)
-    if exec_ok(cmd) then return true end
+    if _G.c_is_dir and _G.c_file_exists then
+        local git_path = path .. "/.git"
+        if _G.c_is_dir(git_path) or _G.c_file_exists(git_path) then
+            return true
+        end
+    else
+        local cmd = string.format("test -d %q/.git || test -f %q/.git", path, path)
+        if exec_ok(cmd) then return true end
+    end
     
     -- Also check if it's a bare repository (must have a HEAD file)
     local head_file = io.open(path .. "/HEAD", "r")
@@ -81,84 +88,186 @@ function git.is_dirty(path)
     return (first_line ~= nil and first_line ~= "")
 end
 
-function git.get_bulk_metadata(path)
-    -- Walk commit log once to get the latest commit date and description for every file and directory
-    local cmd = string.format("git -C %q log --format=format:'COMMIT\31%%ad\31%%s' --name-only --date=format:'%%Y-%%m-%%d'", path)
+function git.get_bulk_metadata(path, head_files, head_count)
+    local remaining = nil
+    if head_files then
+        if head_count ~= nil then
+            remaining = head_count
+        else
+            remaining = 0
+            for _ in pairs(head_files) do remaining = remaining + 1 end
+        end
+        if remaining == 0 then
+            return {}
+        end
+    end
+
+    -- Walk commit log once with -z to get the latest commit date and description
+    -- for every file and directory, stopping early once all HEAD files are resolved.
+    local cmd = string.format("git -C %q log -z --format=format:'COMMIT\31%%ad\31%%s' --name-only --date=format:'%%Y-%%m-%%d'", path)
     local handle = io.popen(cmd)
     if not handle then return {} end
+
     local meta = {}
     local cur_date = ""
     local cur_desc = ""
-    for line in handle:lines() do
-        if line:sub(1, 7) == "COMMIT\31" then
-            local p1 = line:find("\31", 8, true)
-            if p1 then
-                cur_date = line:sub(8, p1 - 1)
-                cur_desc = line:sub(p1 + 1)
-            else
-                cur_date = line:sub(8)
-                cur_desc = ""
-            end
-        elseif line ~= "" then
-            if not meta[line] then
-                meta[line] = { last_changed = cur_date, description = cur_desc }
-            end
-            local slash = line:find("/", 1, true)
-            while slash do
-                local dir = line:sub(1, slash - 1)
-                if not meta[dir] then
-                    meta[dir] = { last_changed = cur_date, description = cur_desc }
+    local done = false
+
+    local function record_file(file_path)
+        if file_path == "" then return end
+        if not meta[file_path] then
+            meta[file_path] = { last_changed = cur_date, description = cur_desc }
+            if head_files and head_files[file_path] then
+                remaining = remaining - 1
+                if remaining <= 0 then
+                    done = true
                 end
-                slash = line:find("/", slash + 1, true)
             end
         end
+        local slash = file_path:find("/", 1, true)
+        while slash do
+            local dir = file_path:sub(1, slash - 1)
+            if not meta[dir] then
+                meta[dir] = { last_changed = cur_date, description = cur_desc }
+            end
+            slash = file_path:find("/", slash + 1, true)
+        end
+    end
+
+    local function process_token(tok)
+        if tok == "" then return end
+        if tok:sub(1, 7) == "COMMIT\31" then
+            local nl = tok:find("\n", 8, true)
+            local header = nl and tok:sub(1, nl - 1) or tok
+            local p1 = header:find("\31", 8, true)
+            if p1 then
+                cur_date = header:sub(8, p1 - 1)
+                cur_desc = header:sub(p1 + 1)
+            else
+                cur_date = header:sub(8)
+                cur_desc = ""
+            end
+            if nl then
+                record_file(tok:sub(nl + 1))
+            end
+        else
+            record_file(tok)
+        end
+    end
+
+    local buf = ""
+    while not done do
+        local chunk = handle:read(65536)
+        if not chunk then break end
+        buf = buf .. chunk
+        local pos = 1
+        while not done do
+            local nul = buf:find("\0", pos, true)
+            if not nul then break end
+            process_token(buf:sub(pos, nul - 1))
+            pos = nul + 1
+        end
+        if pos > 1 then
+            buf = buf:sub(pos)
+        end
+    end
+    if not done and buf ~= "" then
+        process_token(buf)
     end
     handle:close()
     return meta
 end
 
-function git.ls_files(path, subdir, metadata)
-    local ref = "HEAD"
-    local tree_path = "."
-    if subdir and subdir ~= "" then
-        tree_path = subdir
-        -- Ensure it ends with / for ls-tree to list contents
-        if not tree_path:match("/$") then tree_path = tree_path .. "/" end
-    end
-    
-    local cmd = string.format("git -C %q ls-tree %s %q", path, ref, tree_path)
+function git.ls_tree(path)
+    local cmd = string.format("git -C %q ls-tree -r -z HEAD", path)
     local handle = io.popen(cmd)
+    local dirs = { [""] = {} }
     local files = {}
-    for line in handle:lines() do
-        -- Format: 100644 blob <hash>    <path>
-        local mode, type, hash, file_path = line:match("(%d+) (%a+) (%w+)%s+(.*)")
-        if file_path and (type == "blob" or type == "tree") then
-            local last_changed, description
-            if metadata and metadata[file_path] then
-                last_changed = metadata[file_path].last_changed
-                description = metadata[file_path].description
-            else
-                local age_cmd = string.format("git -C %q log -1 --format=%%ad%%x1f%%s --date=format:'%%Y-%%m-%%d' -- %q", path, file_path)
-                local age_handle = io.popen(age_cmd)
+    local file_count = 0
+    if not handle then
+        return { dirs = dirs, files = files, file_count = 0 }
+    end
+    local raw = handle:read("*all") or ""
+    handle:close()
+
+    local seen_dirs = { [""] = true }
+    for entry in raw:gmatch("[^\0]+") do
+        -- Format: <mode> <type> <hash>\t<path>
+        local mode, obj_type, hash, file_path = entry:match("^(%d+) (%a+) (%x+)\t(.*)$")
+        if file_path and obj_type == "blob" then
+            if not files[file_path] then
+                files[file_path] = true
+                file_count = file_count + 1
+            end
+            local parent = file_path:match("^(.*)/[^/]+$") or ""
+            if not dirs[parent] then dirs[parent] = {} end
+            local list = dirs[parent]
+            list[#list + 1] = {
+                mode = mode,
+                type = obj_type,
+                hash = hash,
+                path = file_path,
+                is_dir = false,
+            }
+
+            local cur = parent
+            while cur ~= "" and not seen_dirs[cur] do
+                seen_dirs[cur] = true
+                local grand = cur:match("^(.*)/[^/]+$") or ""
+                if not dirs[grand] then dirs[grand] = {} end
+                local glist = dirs[grand]
+                glist[#glist + 1] = {
+                    mode = "040000",
+                    type = "tree",
+                    hash = "",
+                    path = cur,
+                    is_dir = true,
+                }
+                cur = grand
+            end
+        end
+    end
+
+    return { dirs = dirs, files = files, file_count = file_count }
+end
+
+function git.ls_files(path, subdir, metadata, tree)
+    if not tree then
+        tree = git.ls_tree(path)
+    end
+    local key = (subdir or ""):gsub("^/+", ""):gsub("/+$", "")
+    local entries = tree.dirs[key]
+    if not entries then return {} end
+
+    local files = {}
+    for _, e in ipairs(entries) do
+        local file_path = e.path
+        local last_changed, description
+        if metadata and metadata[file_path] then
+            last_changed = metadata[file_path].last_changed
+            description = metadata[file_path].description
+        else
+            local age_cmd = string.format("git -C %q log -1 --format=%%ad%%x1f%%s --date=format:'%%Y-%%m-%%d' -- %q", path, file_path)
+            local age_handle = io.popen(age_cmd)
+            if age_handle then
                 local line = age_handle:read("*line")
                 age_handle:close()
                 if line then
                     last_changed, description = line:match("^(.-)\31(.*)$")
                 end
             end
-
-            table.insert(files, {
-                mode = mode,
-                type = type,
-                hash = hash,
-                path = file_path,
-                is_dir = (type == "tree"),
-                last_changed = last_changed or "unknown",
-                description = description
-            })
         end
+
+        files[#files + 1] = {
+            mode = e.mode,
+            type = e.type,
+            hash = e.hash,
+            path = file_path,
+            is_dir = e.is_dir,
+            last_changed = last_changed or "unknown",
+            description = description
+        }
     end
-    handle:close()
     return files
 end
 
@@ -225,6 +334,17 @@ function git.is_ignored(_, path)
 end
 
 function git.get_subdirs(path)
+    if _G.c_readdir then
+        local entries = _G.c_readdir(path)
+        local dirs = {}
+        for _, entry in ipairs(entries) do
+            if entry.is_dir then
+                dirs[#dirs + 1] = entry.name
+            end
+        end
+        table.sort(dirs)
+        return dirs
+    end
     local cmd = string.format("ls -1 -F %q 2>/dev/null", path)
     local handle = io.popen(cmd)
     local dirs = {}
