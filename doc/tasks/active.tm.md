@@ -12,3 +12,48 @@
     > **Completed:** 2026-11-23
 
     In `vendor/lunamark/writer/html.lua` (`Html.image`), `w` or `h` evaluates to `nil` when omitted, which terminates the returned sequence table early and drops the closing ` />` (e.g. `![alt](pic.png){width="100"}` emits `<img src="pic.png" alt="alt" width="100"`). Default missing `w`/`h` to `""`, attribute-escape their values, and add a regression test in `test/markdown.test.lua` and `test/webveld.test.lua`.
+
+- [x] Profile git2html on a large repository to establish a performance baseline +AI-G id:e2zzs
+    > **Completed:** 2026-11-24
+
+    Add temporary or reusable timing instrumentation to measure wall-clock time spent in each phase on a large repository (both deep commit history and many files/directories): `git.get_log`, `log.html` rendering, `git.get_bulk_metadata`, `git.ls_files`, `mkdir -p` / filesystem checks, `is_binary`, syntax highlighting, markdown rendering, and file I/O. Record baseline timings so each subsequent optimization can be measured objectively.
+
+- [x] Eliminate O(N^2) string concatenation when building HTML tables +AI-G id:57ggw
+    > **Completed:** 2026-11-24
+
+    Replace repeated `rows = rows .. RI .. ...` and `log_rows = log_rows .. RI .. ...` string concatenation loops in `src/git2html.lua` (`generate_repo_site`, `generate_repo_tree`, and `walk_and_process`) with table accumulation (`rows[#rows + 1] = ...`) followed by a single `table.concat`. On repositories with tens of thousands of commits or large directories, repeated concatenation copies the growing string on every iteration. Verify byte-identical HTML output with `make test`.
+
+- [x] Add POSIX filesystem C helpers to src/bundle_main.c to eliminate shell forks +AI-G id:wjaqe
+    > **Completed:** 2026-11-24
+
+    Following the existing `c_is_newer` pattern in `src/bundle_main.c`, implement lightweight C helpers backed by POSIX syscalls (`mkdir(2)`, `stat(2)`, `opendir(3)`/`readdir(3)`): `c_mkdir_p`, `c_is_dir`, `c_file_exists`, and `c_readdir`. Wire them into `src/git2html.lua` and `src/git_utils.lua` (keeping pure-Lua fallbacks for host-Lua execution) to replace shell-forking `os.execute("mkdir -p ...")`, per-link `test -d` in `rewrite_md_links`, `test -d`/`test -f` in `git.is_repo`, and `ls -1 -F` in `git.get_subdirs`. Ensure zero compiler warnings under `-Wall -Wextra` and full test coverage via `make test`.
+
+- [x] Add single-pass C HTML and attribute escaping helpers to src/bundle_main.c +AI-G id:v98aq
+    > **Completed:** 2026-11-24
+
+    Implement `c_html_escape` and `c_attr_escape` in `src/bundle_main.c` using `luaL_Buffer`, fast-pathing strings that contain no escapable characters (`&`, `<`, `>`, `"`) by returning the original Lua string with zero allocation. Wire them into `html_escape` and `attr_escape` in `src/git2html.lua` (with pure-Lua fallbacks) to replace the 3-4 sequential `string.gsub` passes executed across every table cell, link, and attribute. Verify zero compiler warnings and identical escaping behavior with `make test`.
+
+- [x] Replace per-directory git ls-tree calls with a single recursive git ls-tree -r -z per repository +AI-D id:pvz4s
+    > **Completed:** 2026-11-24
+
+    Refactor `git.ls_files` in `src/git_utils.lua` and `generate_repo_tree` in `src/git2html.lua` to invoke `git -C <repo> ls-tree -r -z HEAD` once per repository and build an in-memory directory tree, instead of spawning a separate `git ls-tree` process for every subdirectory. Using `-z` also avoids git path-quoting issues for filenames containing spaces or non-ASCII characters. Add/update unit and integration tests and verify with `make test`.
+
+- [x] Stop git.get_bulk_metadata early once all HEAD files are resolved and use -z output +AI-D id:jy0hs
+    > **Completed:** 2026-11-24
+
+    Pass the set of current `HEAD` file paths (from `ls-tree -r -z`) into `git.get_bulk_metadata` in `src/git_utils.lua`. Switch `git log --name-only` to `-z` so filenames match `ls-tree` paths reliably (avoiding cache misses that trigger the slow per-file `git log -1` fallback in `git.ls_files`), track how many `HEAD` files still need metadata, and close the `git log` pipe early as soon as all current files have been seen rather than walking the entire remaining history. Verify with `make test`.
+
+- [x] Skip unnecessary I/O and git history walks on incremental rebuilds +AI-D id:ykxeg
+    > **Completed:** 2026-11-24
+
+    In `src/git2html.lua` (`generate_repo_tree`), avoid calling `is_binary(source)` (which opens and reads 8 KiB of every file) before checking `is_newer(html_target, source)` on unchanged files. Additionally, evaluate caching or stamping the rendered `HEAD` commit hash (and relevant CLI/theme inputs) per repository so unchanged repositories in multi-repo runs can skip `git.get_log`, `git.get_bulk_metadata`, and `log.html` regeneration altogether. Add regression tests covering incremental rebuilds and `--prune`.
+
+- [x] Move syntax-highlight token-to-HTML serialization to C (c_tokens_to_html) +AI-D id:txzs7
+    > **Completed:** 2026-11-24
+
+    LPeg lexing in `vendor/lpeg` already runs in C, but `vendor/syntaxhighlight/init.lua` allocates intermediate tables and strings per token (`tag_tokens`, `merge_adjacent`) and runs 5 sequential `string.gsub` passes per token in `escape_text`. Implement `c_tokens_to_html(source, tokens, class_map, class_prefix, bare)` in `src/bundle_main.c` to merge adjacent identical token types by advancing `end_pos` and HTML-escape directly into a `luaL_Buffer` in a single pass, calling it from `vendor/syntaxhighlight/init.lua` when available. Verify byte-identical highlighted output across `make test`.
+
+- [x] Evaluate and implement multi-core parallelism for repository or file rendering in C +AI-D id:w4m3h
+    > **Completed:** 2026-11-24
+
+    After completing the single-threaded Lua and C optimizations, re-profile on large repositories to determine whether rendering is still CPU-bound. If significant headroom remains, implement worker parallelism in `src/bundle_main.c` (e.g. `fork()` per repository or `pthread`s with independent `lua_State` instances) so multi-repo runs or large file trees scale across CPU cores while preserving deterministic output, progress logging, and clean error/exit handling.
